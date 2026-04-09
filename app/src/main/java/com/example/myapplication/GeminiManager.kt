@@ -8,6 +8,7 @@ import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.Header
 import retrofit2.http.POST
+import com.example.myapplication.BuildConfig
 
 
 data class Message(val role: String, val content: String)
@@ -30,7 +31,7 @@ interface GroqApiService {
 }
 
 object GroqManager {
-    private const val API_KEY = "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"
+    private val API_KEY = BuildConfig.GROQ_API_KEY
     private const val BASE_URL = "https://api.groq.com/openai/v1/"
     private const val MODEL_NAME = "llama-3.1-8b-instant"
 

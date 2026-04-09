@@ -17,14 +17,14 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import java.util.Locale
 
-// --- PHẦN 1: SESSION ---
+// SESSION
 class MyAiSession : Session() {
     override fun onCreateScreen(intent: Intent): Screen {
         return MyAiScreen(carContext)
     }
 }
 
-// --- PHẦN 2: SCREEN (GIAO DIỆN & LOGIC) ---
+// SCREEN (GIAO DIỆN & LOGIC)
 class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnInitListener {
     private var displayMessage = "Nhấn nút để bắt đầu nói"
     private var tts: TextToSpeech? = null
