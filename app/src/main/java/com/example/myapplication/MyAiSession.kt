@@ -13,9 +13,20 @@ import androidx.car.app.CarContext
 import androidx.car.app.Screen
 import androidx.car.app.Session
 import androidx.car.app.model.*
+import androidx.core.graphics.drawable.IconCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import java.util.Locale
+
+
+enum class AssistantState {
+    IDLE,
+    LISTENING,
+    THINKING, // calling API Groq
+    SPEAKING
+}
+
+
 
 // SESSION
 class MyAiSession : Session() {
@@ -26,12 +37,29 @@ class MyAiSession : Session() {
 
 // SCREEN (GIAO DIỆN & LOGIC)
 class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnInitListener {
-    private var displayMessage = "Nhấn nút để bắt đầu nói"
+    private var currentState = AssistantState.IDLE
+    private var displayMessage = "Chào bạn tôi có thể giúp gì cho bạn"
     private var tts: TextToSpeech? = null
 
     init {
         // Khởi tạo TTS an toàn
         tts = TextToSpeech(carContext, this)
+
+        setupTtsListener()
+    }
+
+    // TỰ ĐỘNG RESET KHI AI NÓI XONG
+    private fun setupTtsListener() {
+        tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {}
+            override fun onDone(utteranceId: String?) {
+                // Khi AI nói xong, đưa nút bấm về lại hình Mic (IDLE)
+                updateState(AssistantState.IDLE, displayMessage)
+            }
+            override fun onError(utteranceId: String?) {
+                updateState(AssistantState.IDLE, "Lỗi phát âm thanh.")
+            }
+        })
     }
 
     override fun onInit(status: Int) {
@@ -48,20 +76,57 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
     }
 
     override fun onGetTemplate(): Template {
-        val action = Action.Builder()
-            .setTitle("Hỏi AI Agent")
+
+        val iconRes = when (currentState) {
+            AssistantState.LISTENING -> R.drawable.ic_mic
+            AssistantState.SPEAKING -> R.drawable.ic_stop
+            else -> R.drawable.ic_mic
+        }
+
+        val actionButton = Action.Builder()
+            .setIcon(CarIcon.Builder(IconCompat.createWithResource(carContext, iconRes))
+                // Đổi màu nút sang đỏ khi đang nói để tài xế dễ nhận biết nút dừng
+                .setTint(if (currentState == AssistantState.SPEAKING) CarColor.RED else CarColor.PRIMARY)
+                .build())
+
             .setOnClickListener {
-                displayMessage = "Đang lắng nghe..."
-                invalidate()
-                startListening()
+                handleActionClick()
             }
             .build()
 
-        return MessageTemplate.Builder(displayMessage)
+
+        val builder = MessageTemplate.Builder(displayMessage)
+            .setTitle("AI Assistant")
             .setHeaderAction(Action.APP_ICON)
-            .setTitle("Trợ lý AI Agent")
-            .addAction(action)
-            .build()
+            .addAction(actionButton)
+
+        // Hiển thị vòng xoay loading khi AI đang "suy nghĩ" (gọi API Groq)
+        if(currentState == AssistantState.THINKING){
+            builder.setLoading(true)
+        }
+
+        return builder.build()
+    }
+
+    private fun handleActionClick() {
+        when (currentState) {
+            AssistantState.IDLE -> {
+                startListening()
+            }
+            AssistantState.SPEAKING -> {
+                tts?.stop() // dừng nói nếu người dùng nhấn nút stop
+                updateState(AssistantState.IDLE, "Đã dừng. Nhấn mic để hỏi lại.")
+            }
+            else -> {
+                //không làm gì khi đang nghe hoặc đang nghĩ
+            }
+        }
+    }
+
+    private fun updateState(state: AssistantState, message: String){
+        currentState = state
+        displayMessage = message
+        invalidate()
     }
 
     private fun startListening() {
@@ -72,20 +137,24 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
 
         val recognizer = SpeechRecognizer.createSpeechRecognizer(carContext)
         recognizer.setRecognitionListener(object : RecognitionListener {
+
+            override fun onReadyForSpeech(params: Bundle?) {
+                updateState(AssistantState.LISTENING, "Đang nghe...")
+            }
             override fun onResults(results: Bundle?) {
                 val data = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 val textInput = data?.get(0) ?: ""
                 processWithAI(textInput)
             }
-            override fun onReadyForSpeech(params: Bundle?) {}
-            override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
-            override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {}
             override fun onError(error: Int) {
                 displayMessage = "Lỗi nhận diện. Hãy thử lại."
                 invalidate()
             }
+
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {}
             override fun onPartialResults(partialResults: Bundle?) {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
@@ -94,12 +163,13 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
 
     private fun processWithAI(input: String) {
         lifecycleScope.launch {
-            displayMessage = "Đang xử lý..."
-            invalidate()
+            // Chuyển sang trạng thái SUY NGHĨ (hiện vòng xoay)
+            updateState(AssistantState.THINKING, "Đang suy nghĩ..")
 
             val aiResponse = GroqManager.chatWithAI(input)
-            displayMessage = aiResponse
-            invalidate()
+
+            updateState(AssistantState.SPEAKING, aiResponse)
+
 
             val audioManager = carContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 

@@ -37,10 +37,10 @@ object GroqManager {
 
     private val retrofit = Retrofit.Builder()
         .baseUrl(BASE_URL)
-        .addConverterFactory(GsonConverterFactory.create())
+        .addConverterFactory(GsonConverterFactory.create()) // biến json từ server thành đối tượng kotlin hiểu
         .build()
 
-    private val service = retrofit.create(GroqApiService::class.java)
+    private val service = retrofit.create(GroqApiService::class.java) //đối tượng thực tế có khả năng thực hiện các cuộc gọi mạng đến AI của Groq.
 
     suspend fun chatWithAI(userInput: String): String {
         if (userInput.isBlank()) {
