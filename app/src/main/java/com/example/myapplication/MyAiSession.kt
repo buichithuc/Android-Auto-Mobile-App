@@ -20,6 +20,7 @@ import java.util.Locale
 
 
 enum class AssistantState {
+    STARTING,
     IDLE,
     LISTENING,
     THINKING, // calling API Groq
@@ -38,7 +39,7 @@ class MyAiSession : Session() {
 // SCREEN (GIAO DIỆN & LOGIC)
 class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnInitListener {
     private var currentState = AssistantState.IDLE
-    private var displayMessage = "Chào bạn tôi có thể giúp gì cho bạn"
+    private var displayMessage = "Chào bạn! tôi có thể giúp gì cho bạn"
     private var tts: TextToSpeech? = null
 
     init {
@@ -54,10 +55,14 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
             override fun onStart(utteranceId: String?) {}
             override fun onDone(utteranceId: String?) {
                 // Khi AI nói xong, đưa nút bấm về lại hình Mic (IDLE)
-                updateState(AssistantState.IDLE, displayMessage)
+                carContext.mainExecutor.execute {
+                    updateState(AssistantState.IDLE, displayMessage)
+                }
             }
             override fun onError(utteranceId: String?) {
-                updateState(AssistantState.IDLE, "Lỗi phát âm thanh.")
+                carContext.mainExecutor.execute {
+                    updateState(AssistantState.IDLE, "Lỗi phát âm thanh.")
+                }
             }
         })
     }
@@ -77,35 +82,58 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
 
     override fun onGetTemplate(): Template {
 
-        val iconRes = when (currentState) {
-            AssistantState.LISTENING -> R.drawable.ic_mic
-            AssistantState.SPEAKING -> R.drawable.ic_stop
-            else -> R.drawable.ic_mic
+        if(currentState == AssistantState.THINKING || currentState == AssistantState.STARTING){
+            return MessageTemplate.Builder(" ")
+                .setTitle("AI Assistant")
+                .setHeaderAction(Action.APP_ICON)
+                .setLoading(true)
+                .build()
         }
+
+
+        // Hiển thị vòng xoay loading khi AI đang "suy nghĩ" (gọi API Groq)
+        if(currentState == AssistantState.SPEAKING && displayMessage.contains("\n")){
+            val paneBuilder = Pane.Builder()
+            val lines = displayMessage.split("\n").filter{it.isNotBlank()}
+
+            lines.take(4).forEach { line ->
+                paneBuilder.addRow(
+                    Row.Builder()
+                        .setTitle(line.replace("- ", "").replace("* ", ""))
+                        .build()
+                )
+
+            }
+
+            val stopAction = Action.Builder()
+                .setIcon(CarIcon.Builder(IconCompat.createWithResource(carContext, R.drawable.ic_stop))
+                    .setTint(CarColor.RED)
+                    .build())
+                .setOnClickListener { handleActionClick() }
+                .build()
+            paneBuilder.addAction(stopAction)
+
+            return PaneTemplate.Builder(paneBuilder.build())
+                .setTitle("AI Phản hồi")
+                .setHeaderAction(Action.APP_ICON)
+                .build()
+        }
+
+
+        val iconRes = if (currentState == AssistantState.LISTENING) R.drawable.ic_mic else R.drawable.ic_mic
 
         val actionButton = Action.Builder()
             .setIcon(CarIcon.Builder(IconCompat.createWithResource(carContext, iconRes))
-                // Đổi màu nút sang đỏ khi đang nói để tài xế dễ nhận biết nút dừng
-                .setTint(if (currentState == AssistantState.SPEAKING) CarColor.RED else CarColor.PRIMARY)
+                .setTint(CarColor.PRIMARY)
                 .build())
-
-            .setOnClickListener {
-                handleActionClick()
-            }
+            .setOnClickListener { handleActionClick() }
             .build()
 
-
-        val builder = MessageTemplate.Builder(displayMessage)
+        return MessageTemplate.Builder(displayMessage)
             .setTitle("AI Assistant")
             .setHeaderAction(Action.APP_ICON)
             .addAction(actionButton)
-
-        // Hiển thị vòng xoay loading khi AI đang "suy nghĩ" (gọi API Groq)
-        if(currentState == AssistantState.THINKING){
-            builder.setLoading(true)
-        }
-
-        return builder.build()
+            .build()
     }
 
     private fun handleActionClick() {
@@ -130,32 +158,49 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
     }
 
     private fun startListening() {
+
+        updateState(AssistantState.STARTING, "...")
+
+
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "vi-VN")
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
         }
 
         val recognizer = SpeechRecognizer.createSpeechRecognizer(carContext)
         recognizer.setRecognitionListener(object : RecognitionListener {
 
+            override fun onPartialResults(partialResults: Bundle?){
+                val text = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.get(0) ?: ""
+                if(text.isNotEmpty()) {
+                    updateState(AssistantState.LISTENING, text)
+                }
+            }
+
             override fun onReadyForSpeech(params: Bundle?) {
                 updateState(AssistantState.LISTENING, "Đang nghe...")
             }
             override fun onResults(results: Bundle?) {
-                val data = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val textInput = data?.get(0) ?: ""
-                processWithAI(textInput)
+                val finalInput = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.get(0) ?: ""
+                recognizer.destroy()
+
+                if(finalInput.isNotEmpty()) {
+                    processWithAI(finalInput)
+                } else {
+                    updateState(AssistantState.IDLE, "Mời bạn nhấn lại để nói")
+                }
+
             }
             override fun onError(error: Int) {
-                displayMessage = "Lỗi nhận diện. Hãy thử lại."
-                invalidate()
+                recognizer.destroy() // Giải phóng tài nguyên ngay khi lỗi
+                updateState(AssistantState.IDLE, "Lỗi nhận diện ($error). Hãy thử lại.")
             }
 
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
-            override fun onPartialResults(partialResults: Bundle?) {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
         recognizer.startListening(intent)
@@ -163,24 +208,30 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
 
     private fun processWithAI(input: String) {
         lifecycleScope.launch {
-            // Chuyển sang trạng thái SUY NGHĨ (hiện vòng xoay)
-            updateState(AssistantState.THINKING, "Đang suy nghĩ..")
+            try {
+                // Chuyển sang trạng thái SUY NGHĨ (hiện vòng xoay)
+                updateState(AssistantState.THINKING, "Đang suy nghĩ..")
 
-            val aiResponse = GroqManager.chatWithAI(input)
+                val aiResponse = GroqManager.chatWithAI(input)
 
-            updateState(AssistantState.SPEAKING, aiResponse)
+                updateState(AssistantState.SPEAKING, aiResponse)
 
 
-            val audioManager = carContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                val audioManager =
+                    carContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
-            val result = audioManager.requestAudioFocus(
-                null,
-                AudioManager.STREAM_MUSIC,
-                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
-            )
+                val result = audioManager.requestAudioFocus(
+                    null,
+                    AudioManager.STREAM_MUSIC,
+                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+                )
 
-            if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
-                tts?.speak(aiResponse, TextToSpeech.QUEUE_FLUSH, null, "GroqTTS")
+                if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+                    tts?.speak(aiResponse, TextToSpeech.QUEUE_FLUSH, null, "GroqTTS")
+                }
+            }catch(e: Exception){
+                Log.e("AI_ERROR", "Lỗi gọi API: ${e.message}")
+                updateState(AssistantState.IDLE, "Lỗi kết nối. Hãy thử lại sau.")
             }
         }
     }

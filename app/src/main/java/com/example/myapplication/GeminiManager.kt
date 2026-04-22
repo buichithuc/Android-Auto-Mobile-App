@@ -54,7 +54,7 @@ object GroqManager {
                     messages = listOf(
                         Message(
                             "system",
-                            "Bạn là trợ lý lái xe, hãy trả lời ngắn gọn xúc tích dưới 30 từ"
+                            "Bạn là trợ lý lái xe. Nếu có nhiều ý, hãy trả lời bằng cách xuống dòng và dùng dấu gạch đầu dòng. Trả lời dưới 4 dòng."
                         ),
                         Message("user", userInput)
                     )
