@@ -22,6 +22,7 @@ import java.util.Locale
 enum class AssistantState {
     STARTING,
     IDLE,
+    WAITING_FOR_HOTWORD,
     LISTENING,
     THINKING, // calling API Groq
     SPEAKING
@@ -42,11 +43,17 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
     private var displayMessage = "Chào bạn! tôi có thể giúp gì cho bạn"
     private var tts: TextToSpeech? = null
 
+    // Lưu biến toàn cục để có thể destroy() bất cứ lúc nào, tránh xung đột Mic
+    private var activeRecognizer: SpeechRecognizer? = null
+    private var passiveRecognizer: SpeechRecognizer? = null
+    private val HOTWORD = "trợ lý"
+
     init {
         // Khởi tạo TTS an toàn
         tts = TextToSpeech(carContext, this)
 
         setupTtsListener()
+        startPassiveListening()
     }
 
     // TỰ ĐỘNG RESET KHI AI NÓI XONG
@@ -57,42 +64,82 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
                 // Khi AI nói xong, đưa nút bấm về lại hình Mic (IDLE)
                 carContext.mainExecutor.execute {
                     updateState(AssistantState.IDLE, displayMessage)
+                    startPassiveListening()
                 }
             }
             override fun onError(utteranceId: String?) {
                 carContext.mainExecutor.execute {
                     updateState(AssistantState.IDLE, "Lỗi phát âm thanh.")
+                    startPassiveListening()
                 }
             }
         })
     }
 
-    override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) {
-            val result = tts?.setLanguage(Locale("vi", "VN"))
-            if(result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                Log.e("TTS", "Ngôn ngữ tiếng Việt chưa được hỗ trợ hoặc chưa tải về")
-            } else{
-                Log.d("TTS", "Khởi tạo TTS tiếng Việt thành công!")
-            }
-        }else {
-            Log.e("TTS", "Khởi tạo thất bại, mã lỗi: $status")
+    private fun startPassiveListening() {
+        if(currentState != AssistantState.IDLE && currentState != AssistantState.WAITING_FOR_HOTWORD) return
+
+        currentState = AssistantState.WAITING_FOR_HOTWORD
+
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "vi-VN")
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
         }
+
+        passiveRecognizer?.destroy()
+        passiveRecognizer = SpeechRecognizer.createSpeechRecognizer(carContext)
+        passiveRecognizer?.setRecognitionListener(object : RecognitionListener {
+            override fun onPartialResults(partialResults: Bundle?) {
+                val data = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                val text = data?.get(0)?.lowercase() ?: ""
+
+                if (text.contains(HOTWORD)) {
+                    passiveRecognizer?.destroy()
+                    // Kích hoạt phiên nghe thật sự
+                    carContext.mainExecutor.execute { startListening() }
+                }
+            }
+
+            override fun onError(error: Int) {
+                passiveRecognizer?.destroy()
+                // Nếu timeout (không ai nói gì), tự khởi động lại vòng lặp rảnh tay
+                if (error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT || error == SpeechRecognizer.ERROR_NO_MATCH) {
+                    startPassiveListening()
+                }
+            }
+
+            override fun onResults(results: Bundle?) {
+                passiveRecognizer?.destroy()
+                startPassiveListening()
+            }
+            override fun onReadyForSpeech(p0: Bundle?) {}
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(p0: Float) {}
+            override fun onBufferReceived(p0: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onEvent(p0: Int, p1: Bundle?) {}
+        })
+
+
+        passiveRecognizer?.startListening(intent)
+    }
+
+
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) tts?.language = Locale("vi", "VN")
     }
 
     override fun onGetTemplate(): Template {
+        val builder = MessageTemplate.Builder(displayMessage)
+            .setTitle("AI Assistant")
+            .setHeaderAction(Action.APP_ICON)
 
         if(currentState == AssistantState.THINKING || currentState == AssistantState.STARTING){
-            return MessageTemplate.Builder(" ")
-                .setTitle("AI Assistant")
-                .setHeaderAction(Action.APP_ICON)
-                .setLoading(true)
-                .build()
+            builder.setLoading(true)
         }
 
-
-        // Hiển thị vòng xoay loading khi AI đang "suy nghĩ" (gọi API Groq)
-        if(currentState == AssistantState.SPEAKING && displayMessage.contains("\n")){
+        else if(currentState == AssistantState.SPEAKING && displayMessage.contains("\n")){
             val paneBuilder = Pane.Builder()
             val lines = displayMessage.split("\n").filter{it.isNotBlank()}
 
@@ -118,32 +165,30 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
                 .setHeaderAction(Action.APP_ICON)
                 .build()
         }
+        else {
+            val isListening = (currentState == AssistantState.LISTENING)
+            val isWaiting = (currentState == AssistantState.WAITING_FOR_HOTWORD)
 
-
-        val iconRes = if (currentState == AssistantState.LISTENING) R.drawable.ic_mic else R.drawable.ic_mic
-
-        val actionButton = Action.Builder()
-            .setIcon(CarIcon.Builder(IconCompat.createWithResource(carContext, iconRes))
-                .setTint(CarColor.PRIMARY)
+            val actionButton = Action.Builder()
+                .setIcon(CarIcon.Builder(IconCompat.createWithResource(carContext, R.drawable.ic_mic))
+                .setTint(if (isListening) CarColor.BLUE else if (isWaiting) CarColor.GREEN else CarColor.PRIMARY)
                 .build())
-            .setOnClickListener { handleActionClick() }
-            .build()
-
-        return MessageTemplate.Builder(displayMessage)
-            .setTitle("AI Assistant")
-            .setHeaderAction(Action.APP_ICON)
-            .addAction(actionButton)
-            .build()
+                .setOnClickListener { handleActionClick() }
+                .build()
+            builder.addAction(actionButton)
+        }
+        return builder.build()
     }
 
     private fun handleActionClick() {
         when (currentState) {
-            AssistantState.IDLE -> {
+            AssistantState.IDLE, AssistantState.WAITING_FOR_HOTWORD -> {
                 startListening()
             }
             AssistantState.SPEAKING -> {
                 tts?.stop() // dừng nói nếu người dùng nhấn nút stop
                 updateState(AssistantState.IDLE, "Đã dừng. Nhấn mic để hỏi lại.")
+                startPassiveListening()
             }
             else -> {
                 //không làm gì khi đang nghe hoặc đang nghĩ
@@ -159,7 +204,10 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
 
     private fun startListening() {
 
-        updateState(AssistantState.STARTING, "...")
+        passiveRecognizer?.destroy()
+        activeRecognizer?.destroy()
+
+        updateState(AssistantState.STARTING, "Mời bạn nói...")
 
 
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -168,8 +216,8 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
         }
 
-        val recognizer = SpeechRecognizer.createSpeechRecognizer(carContext)
-        recognizer.setRecognitionListener(object : RecognitionListener {
+        val activeRecognizer = SpeechRecognizer.createSpeechRecognizer(carContext)
+        activeRecognizer?.setRecognitionListener(object : RecognitionListener {
 
             override fun onPartialResults(partialResults: Bundle?){
                 val text = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.get(0) ?: ""
@@ -183,18 +231,15 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
             }
             override fun onResults(results: Bundle?) {
                 val finalInput = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.get(0) ?: ""
-                recognizer.destroy()
-
-                if(finalInput.isNotEmpty()) {
-                    processWithAI(finalInput)
-                } else {
-                    updateState(AssistantState.IDLE, "Mời bạn nhấn lại để nói")
-                }
+                activeRecognizer?.destroy()
+                if(finalInput.isNotEmpty()) processWithAI(finalInput)
+                else startPassiveListening()
 
             }
             override fun onError(error: Int) {
-                recognizer.destroy() // Giải phóng tài nguyên ngay khi lỗi
-                updateState(AssistantState.IDLE, "Lỗi nhận diện ($error). Hãy thử lại.")
+                activeRecognizer?.destroy()
+                updateState(AssistantState.IDLE, "Tôi không nghe rõ. Thử lại nhé?")
+                startPassiveListening()
             }
 
             override fun onBeginningOfSpeech() {}
@@ -203,7 +248,7 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
             override fun onEndOfSpeech() {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
-        recognizer.startListening(intent)
+        activeRecognizer?.startListening(intent)
     }
 
     private fun processWithAI(input: String) {
@@ -232,6 +277,7 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
             }catch(e: Exception){
                 Log.e("AI_ERROR", "Lỗi gọi API: ${e.message}")
                 updateState(AssistantState.IDLE, "Lỗi kết nối. Hãy thử lại sau.")
+                startPassiveListening()
             }
         }
     }
