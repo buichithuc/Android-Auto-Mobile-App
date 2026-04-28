@@ -6,12 +6,12 @@ plugins {
 
 android {
     namespace = "com.example.myapplication"
-    compileSdk = 36
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.example.myapplication"
         minSdk = 29
-        targetSdk = 36
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
@@ -22,9 +22,11 @@ android {
             properties.load(propertiesFile.inputStream())
         }
 
-        val groqKey = properties.getProperty("GROQ_API_KEY") ?: ""
+        //val groqKey = properties.getProperty("GROQ_API_KEY") ?: ""
+        val geminiKey = properties.getProperty("GEMINI_API_KEY") ?: ""
 
-        buildConfigField("String", "GROQ_API_KEY", "\"$groqKey\"")
+        //buildConfigField("String", "GROQ_API_KEY", "\"$groqKey\"")
+        buildConfigField("String", "GEMINI_API_KEY", "\"$geminiKey\"")
     }
 
     buildFeatures {
@@ -51,6 +53,9 @@ android {
 
 dependencies {
 
+
+    // Thêm SDK Gemini
+    implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
     // Android for Cars App Library (Để chạy trên ô tô)
     implementation("androidx.car.app:app:1.4.0-rc01")
     // HTTP Client (Để kết nối Groq API)

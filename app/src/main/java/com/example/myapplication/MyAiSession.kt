@@ -51,7 +51,6 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
     init {
         // Khởi tạo TTS an toàn
         tts = TextToSpeech(carContext, this)
-
         setupTtsListener()
         startPassiveListening()
     }
@@ -135,13 +134,42 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
             .setTitle("AI Assistant")
             .setHeaderAction(Action.APP_ICON)
 
-        if(currentState == AssistantState.THINKING || currentState == AssistantState.STARTING){
-            builder.setLoading(true)
+
+        when(currentState) {
+            AssistantState.THINKING, AssistantState.STARTING-> {
+                builder.setLoading(true)
+            }
+
+            AssistantState.LISTENING -> {
+
+            }
+
+            AssistantState.SPEAKING, AssistantState.IDLE, AssistantState.WAITING_FOR_HOTWORD -> {
+                val iconRes = if (currentState == AssistantState.SPEAKING) R.drawable.ic_stop else R.drawable.ic_mic
+                val iconColor = when(currentState) {
+                    AssistantState.SPEAKING -> CarColor.RED
+                    AssistantState.WAITING_FOR_HOTWORD -> CarColor.GREEN // Hoặc CarColor.SECONDARY
+                    else -> CarColor.PRIMARY
+                }
+
+                val actionButton = Action.Builder()
+                    .setIcon(CarIcon.Builder(IconCompat.createWithResource(carContext, iconRes))
+                    .setTint(iconColor)
+                    .build())
+                    .setOnClickListener { handleActionClick() }
+                    .build()
+
+                builder.addAction(actionButton)
+            }
+
+            else -> {
+
+            }
         }
 
-        else if(currentState == AssistantState.SPEAKING && displayMessage.contains("\n")){
+        if (currentState == AssistantState.SPEAKING && displayMessage.contains("\n")) {
             val paneBuilder = Pane.Builder()
-            val lines = displayMessage.split("\n").filter{it.isNotBlank()}
+            val lines = displayMessage.split("\n").filter { it.isNotBlank() }
 
             lines.take(4).forEach { line ->
                 paneBuilder.addRow(
@@ -153,9 +181,16 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
             }
 
             val stopAction = Action.Builder()
-                .setIcon(CarIcon.Builder(IconCompat.createWithResource(carContext, R.drawable.ic_stop))
-                    .setTint(CarColor.RED)
-                    .build())
+                .setIcon(
+                    CarIcon.Builder(
+                        IconCompat.createWithResource(
+                            carContext,
+                            R.drawable.ic_stop
+                        )
+                    )
+                        .setTint(CarColor.RED)
+                        .build()
+                )
                 .setOnClickListener { handleActionClick() }
                 .build()
             paneBuilder.addAction(stopAction)
@@ -164,18 +199,6 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
                 .setTitle("AI Phản hồi")
                 .setHeaderAction(Action.APP_ICON)
                 .build()
-        }
-        else {
-            val isListening = (currentState == AssistantState.LISTENING)
-            val isWaiting = (currentState == AssistantState.WAITING_FOR_HOTWORD)
-
-            val actionButton = Action.Builder()
-                .setIcon(CarIcon.Builder(IconCompat.createWithResource(carContext, R.drawable.ic_mic))
-                .setTint(if (isListening) CarColor.BLUE else if (isWaiting) CarColor.GREEN else CarColor.PRIMARY)
-                .build())
-                .setOnClickListener { handleActionClick() }
-                .build()
-            builder.addAction(actionButton)
         }
         return builder.build()
     }
@@ -216,7 +239,7 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
         }
 
-        val activeRecognizer = SpeechRecognizer.createSpeechRecognizer(carContext)
+        activeRecognizer = SpeechRecognizer.createSpeechRecognizer(carContext)
         activeRecognizer?.setRecognitionListener(object : RecognitionListener {
 
             override fun onPartialResults(partialResults: Bundle?){
@@ -234,7 +257,6 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
                 activeRecognizer?.destroy()
                 if(finalInput.isNotEmpty()) processWithAI(finalInput)
                 else startPassiveListening()
-
             }
             override fun onError(error: Int) {
                 activeRecognizer?.destroy()
@@ -257,7 +279,7 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
                 // Chuyển sang trạng thái SUY NGHĨ (hiện vòng xoay)
                 updateState(AssistantState.THINKING, "Đang suy nghĩ..")
 
-                val aiResponse = GroqManager.chatWithAI(input)
+                val aiResponse = GeminiManager.chatWithAI(input)
 
                 updateState(AssistantState.SPEAKING, aiResponse)
 
