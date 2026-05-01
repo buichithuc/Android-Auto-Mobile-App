@@ -1,7 +1,11 @@
 package com.example.myapplication
 
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Bundle
 import android.speech.RecognitionListener
@@ -17,6 +21,8 @@ import androidx.core.graphics.drawable.IconCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import java.util.Locale
+import android.net.Uri
+import androidx.core.content.ContextCompat
 
 
 enum class AssistantState {
@@ -48,11 +54,55 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
     private var passiveRecognizer: SpeechRecognizer? = null
     private val HOTWORD = "trợ lý"
 
+    private val messageReceiver = object: BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+           val sender = intent?.getStringExtra("bundle_sender") ?: "Người dùng ẩn danh"
+            val content = intent?.getStringExtra("bundle_content") ?: ""
+
+            if(content.isNotEmpty()){
+                lifecycleScope.launch {
+                    processWithAI("Tóm tắt ngắn gọn tin nhắn từ $sender: $content")
+                }
+            }
+        }
+    }
+
+
+
     init {
         // Khởi tạo TTS an toàn
         tts = TextToSpeech(carContext, this)
         setupTtsListener()
         startPassiveListening()
+
+        lifecycle.addObserver(object : androidx.lifecycle.DefaultLifecycleObserver {
+            override fun onStart(owner: androidx.lifecycle.LifecycleOwner) {
+                val filter = IntentFilter("COM_EXAMPLE_NEW_MESSAGE")
+
+                // Với Android 14 trên máy realme của bạn, cần flag RECEIVER_EXPORTED
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                    carContext.registerReceiver(messageReceiver, filter, Context.RECEIVER_EXPORTED)
+                } else {
+                    ContextCompat.registerReceiver(
+                        carContext,
+                        messageReceiver,
+                        filter,
+                        ContextCompat.RECEIVER_EXPORTED
+                    )
+                }
+                Log.d("AI_DEBUG", "Đã đăng ký lắng nghe tin nhắn")
+            }
+
+            override fun onStop(owner: androidx.lifecycle.LifecycleOwner) {
+                try {
+                    carContext.unregisterReceiver(messageReceiver)
+                    Log.d("AI_DEBUG", "Đã hủy đăng ký lắng nghe tin nhắn")
+                } catch (e: Exception) {
+                    Log.e("AI_DEBUG", "Lỗi khi hủy receiver: ${e.message}")
+                }
+            }
+        })
+
     }
 
     // TỰ ĐỘNG RESET KHI AI NÓI XONG
@@ -274,6 +324,14 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
     }
 
     private fun processWithAI(input: String) {
+        val lowerInput = input.lowercase()
+        if(lowerInput.contains("xóa lịch sử") || lowerInput.contains("làm mới cuộc trò chuyện")){
+            GeminiManager.clearChatHistory()
+            updateState(AssistantState.IDLE, "Lịch sử trò chuyện đã được làm mới.")
+            tts?.speak("Đã xóa lịch sử trò chuyện", TextToSpeech.QUEUE_FLUSH, null, "ClearHistoryTTS")
+            startPassiveListening()
+            return
+        }
         lifecycleScope.launch {
             try {
                 // Chuyển sang trạng thái SUY NGHĨ (hiện vòng xoay)
@@ -281,26 +339,69 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
 
                 val aiResponse = GeminiManager.chatWithAI(input)
 
-                updateState(AssistantState.SPEAKING, aiResponse)
-
-
                 val audioManager =
                     carContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
-                val result = audioManager.requestAudioFocus(
-                    null,
-                    AudioManager.STREAM_MUSIC,
-                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
-                )
+                if(android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    val audioAttributes = AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
 
-                if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
-                    tts?.speak(aiResponse, TextToSpeech.QUEUE_FLUSH, null, "GroqTTS")
+
+                    val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                        .setAudioAttributes(audioAttributes)
+                        .build()
+
+                    val result = audioManager.requestAudioFocus(focusRequest)
+
+                    if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+                        //Kiểm tra ý định dẫn đường
+                        if (aiResponse.startsWith("NAVIGATE_TO:")) {
+                            val parts = aiResponse.split(".")
+                            val destination = parts[0].replace("NAVIGATE_TO:", "").trim()
+                            val speechText = parts.drop(1).joinToString(".").trim()
+                            updateState(AssistantState.SPEAKING, speechText)
+                            speakAndNavigate(speechText, destination)
+                        } else {
+                            updateState(AssistantState.SPEAKING, aiResponse)
+                            tts?.speak(aiResponse, TextToSpeech.QUEUE_FLUSH, null, "GeminiTTS")
+                        }
+                    } else {
+                        updateState(AssistantState.IDLE, aiResponse)
+                    }
                 }
+
             }catch(e: Exception){
                 Log.e("AI_ERROR", "Lỗi gọi API: ${e.message}")
                 updateState(AssistantState.IDLE, "Lỗi kết nối. Hãy thử lại sau.")
                 startPassiveListening()
             }
+        }
+    }
+    private fun speakAndNavigate(text: String, destination: String) {
+        // 1. Phát âm thanh phản hồi trước
+        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "NavTTS")
+
+        try {
+            // 2. Làm sạch và mã hóa địa điểm (Quan trọng cho tiếng Việt có dấu/khoảng trắng)
+            val encodedDestination = android.net.Uri.encode(destination.trim())
+            val uri = android.net.Uri.parse("google.navigation:q=$encodedDestination")
+
+            // 3. Tạo Intent với Action chuẩn của Android Auto
+            val intent = Intent(CarContext.ACTION_NAVIGATE, uri).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+
+            // 4. Thực hiện lệnh mở App bản đồ
+            carContext.startCarApp(intent)
+
+        } catch (e: Exception) {
+            // Log lỗi chi tiết để debug trong Logcat
+            Log.e("NAV_ERROR", "Lỗi điều hướng đến $destination: ${e.message}")
+
+            // Thông báo lỗi bằng giọng nói để tài xế biết
+            tts?.speak("Rất tiếc, tôi không thể mở bản đồ lúc này.", TextToSpeech.QUEUE_ADD, null, "NavErrorTTS")
         }
     }
 }

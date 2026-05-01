@@ -86,6 +86,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.example.myapplication.BuildConfig
 
+
 object GeminiManager {
     private const val API_KEY = BuildConfig.GEMINI_API_KEY // Lấy key từ Google AI Studio
     private const val MODEL_NAME = "gemini-2.5-flash" // Bản Flash cực nhanh cho ô tô
@@ -98,18 +99,23 @@ object GeminiManager {
             temperature = 0.7f
             maxOutputTokens = 500
         },
-        // System Prompt tương tự như bạn đã làm với Groq
+        // System Prompt
         systemInstruction = content {
-            text("Bạn là trợ lý lái xe. Nếu có nhiều ý, hãy trả lời bằng cách xuống dòng và dùng dấu gạch đầu dòng. Trả lời dưới 4 dòng.")
+            text("Bạn là trợ lý lái xe. " +
+                    "Nếu người dùng muốn đi đâu đó, hãy bắt đầu câu trả lời bằng cụm từ 'NAVIGATE_TO: [tên địa điểm]'. " +
+                    "Ví dụ: 'NAVIGATE_TO: Hồ Hoàn Kiếm. Đang mở bản đồ dẫn bạn đến Hồ Hoàn Kiếm.' " +
+                    "Nếu không phải yêu cầu dẫn đường, hãy trả lời bình thường dưới 4 dòng.")
         }
     )
+
+    private var chatSession = model.startChat(history = emptyList())
 
     suspend fun chatWithAI(userInput: String): String {
         if (userInput.isBlank()) return "Tôi chưa nghe thấy câu hỏi"
 
         return withContext(Dispatchers.IO) {
             try {
-                val response = model.generateContent(userInput)
+                val response = chatSession.sendMessage(userInput)
                 response.text ?: "AI không có phản hồi" // Giá trị trả về nếu thành công
             } catch (e: Exception) {
                 Log.e("GEMINI_DEBUG", "Lỗi chi tiết: ${e.message}")
@@ -124,6 +130,9 @@ object GeminiManager {
                 }
             }
         }
+    }
+    fun clearChatHistory() {
+        chatSession = model.startChat(history = emptyList())
     }
 }
 
