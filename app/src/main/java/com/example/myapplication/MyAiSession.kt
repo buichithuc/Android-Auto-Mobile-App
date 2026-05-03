@@ -48,6 +48,8 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
     private var currentState = AssistantState.IDLE
     private var displayMessage = "Chào bạn! tôi có thể giúp gì cho bạn"
     private var tts: TextToSpeech? = null
+    private var pendingNavDestination: String? = null
+    private var pendingNavUri: Uri? = null
 
     // Lưu biến toàn cục để có thể destroy() bất cứ lúc nào, tránh xung đột Mic
     private var activeRecognizer: SpeechRecognizer? = null
@@ -56,7 +58,7 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
 
     private val messageReceiver = object: BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-           val sender = intent?.getStringExtra("bundle_sender") ?: "Người dùng ẩn danh"
+            val sender = intent?.getStringExtra("bundle_sender") ?: "Người dùng ẩn danh"
             val content = intent?.getStringExtra("bundle_content") ?: ""
 
             if(content.isNotEmpty()){
@@ -70,6 +72,20 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
 
 
     init {
+        // Check if there's a pending navigation request from Android Auto
+        val pendingNavUri = MyAiCarService.pendingNavigationUri
+        if (pendingNavUri != null) {
+            Log.d("NAV_SCREEN", "Processing pending navigation URI: $pendingNavUri")
+            val query = pendingNavUri.getQueryParameter("q")
+            if (query != null) {
+                Log.d("NAV_SCREEN", "Navigation destination: $query")
+                // Store for later when TTS is ready
+                pendingNavDestination = query
+                this.pendingNavUri = pendingNavUri
+            }
+            MyAiCarService.pendingNavigationUri = null
+        }
+        
         // Khởi tạo TTS an toàn
         tts = TextToSpeech(carContext, this)
         setupTtsListener()
@@ -91,6 +107,13 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
                     )
                 }
                 Log.d("AI_DEBUG", "Đã đăng ký lắng nghe tin nhắn")
+                
+                // Process pending navigation after screen starts (TTS should be ready by then)
+                if (pendingNavDestination != null && tts != null && pendingNavUri != null) {
+                    Log.d("NAV_SCREEN", "Starting pending navigation to: $pendingNavDestination")
+                    startNavigation(pendingNavUri!!, pendingNavDestination!!)
+                    pendingNavDestination = null
+                }
             }
 
             override fun onStop(owner: androidx.lifecycle.LifecycleOwner) {
@@ -204,8 +227,8 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
 
                 val actionButton = Action.Builder()
                     .setIcon(CarIcon.Builder(IconCompat.createWithResource(carContext, iconRes))
-                    .setTint(iconColor)
-                    .build())
+                        .setTint(iconColor)
+                        .build())
                     .setOnClickListener { handleActionClick() }
                     .build()
 
@@ -380,28 +403,43 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
         }
     }
     private fun speakAndNavigate(text: String, destination: String) {
-        // 1. Phát âm thanh phản hồi trước
+        // Phát âm thanh phản hồi
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "NavTTS")
 
         try {
-            // 2. Làm sạch và mã hóa địa điểm (Quan trọng cho tiếng Việt có dấu/khoảng trắng)
+            // Làm sạch và mã hóa địa điểm
             val encodedDestination = android.net.Uri.encode(destination.trim())
-            val uri = android.net.Uri.parse("google.navigation:q=$encodedDestination")
-
-            // 3. Tạo Intent với Action chuẩn của Android Auto
-            val intent = Intent(CarContext.ACTION_NAVIGATE, uri).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-
-            // 4. Thực hiện lệnh mở App bản đồ
-            carContext.startCarApp(intent)
+            val uri = android.net.Uri.parse("geo:0,0?q=$encodedDestination")
+            
+            Log.d("NAV_DEBUG", "Navigation request for: $destination")
+            Log.d("NAV_DEBUG", "Encoded URI: $uri")
+            
+            // Start navigation - shows UI on Android Auto and provides voice feedback
+            startNavigation(uri, destination)
+            
+            // Thông báo thêm bằng giọng nói
+            tts?.speak("Đang mở bản đồ để điều hướng đến $destination", TextToSpeech.QUEUE_ADD, null, "NavInfoTTS")
 
         } catch (e: Exception) {
-            // Log lỗi chi tiết để debug trong Logcat
-            Log.e("NAV_ERROR", "Lỗi điều hướng đến $destination: ${e.message}")
+            Log.e("NAV_ERROR", "Lỗi xử lý điều hướng đến $destination: ${e.message}")
+            tts?.speak("Rất tiếc, tôi không thể xử lý yêu cầu điều hướng lúc này.", TextToSpeech.QUEUE_ADD, null, "NavErrorTTS")
+        }
+    }
 
-            // Thông báo lỗi bằng giọng nói để tài xế biết
-            tts?.speak("Rất tiếc, tôi không thể mở bản đồ lúc này.", TextToSpeech.QUEUE_ADD, null, "NavErrorTTS")
+    /**
+     * Show navigation screen in Android Auto
+     */
+    private fun startNavigation(navigationUri: Uri, destination: String) {
+        try {
+            Log.d("NAV_SCREEN", "Starting navigation: $destination")
+            
+            // Show navigation screen in Android Auto with destination info
+            val navigationScreen = NavigationScreen(carContext, destination)
+            screenManager.push(navigationScreen)
+            
+            Log.d("NAV_SCREEN", "Navigation screen pushed successfully")
+        } catch (e: Exception) {
+            Log.e("NAV_SCREEN", "Error starting navigation: ${e.message}", e)
         }
     }
 }

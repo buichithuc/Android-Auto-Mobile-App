@@ -135,5 +135,3 @@ object GeminiManager {
         chatSession = model.startChat(history = emptyList())
     }
 }
-
-
