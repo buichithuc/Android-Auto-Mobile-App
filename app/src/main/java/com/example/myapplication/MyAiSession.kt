@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.location.LocationManager
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
@@ -23,6 +24,8 @@ import kotlinx.coroutines.launch
 import java.util.Locale
 import android.net.Uri
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 
 enum class AssistantState {
@@ -56,6 +59,14 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
     private var passiveRecognizer: SpeechRecognizer? = null
     private val HOTWORD = "trợ lý"
 
+    private var locationManager: LocationManager? = null
+    private var currentLatitude: Double? = null
+    private var currentLongitude: Double? = null
+
+
+
+
+
     private val messageReceiver = object: BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val sender = intent?.getStringExtra("bundle_sender") ?: "Người dùng ẩn danh"
@@ -85,6 +96,8 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
             }
             MyAiCarService.pendingNavigationUri = null
         }
+
+        locationManager = carContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
         
         // Khởi tạo TTS an toàn
         tts = TextToSpeech(carContext, this)
@@ -346,8 +359,12 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
         activeRecognizer?.startListening(intent)
     }
 
+
+
     private fun processWithAI(input: String) {
         val lowerInput = input.lowercase()
+
+
         if(lowerInput.contains("xóa lịch sử") || lowerInput.contains("làm mới cuộc trò chuyện")){
             GeminiManager.clearChatHistory()
             updateState(AssistantState.IDLE, "Lịch sử trò chuyện đã được làm mới.")
@@ -355,6 +372,19 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
             startPassiveListening()
             return
         }
+
+        if (lowerInput.contains("thời tiết") ||
+            lowerInput.contains("trời") ||
+            lowerInput.contains("mưa") ||
+            lowerInput.contains("nắng")) {
+
+            lifecycleScope.launch {
+                handleWeatherRequest()
+            }
+            return  // Dừng để không gọi Gemini API
+        }
+
+
         lifecycleScope.launch {
             try {
                 // Chuyển sang trạng thái SUY NGHĨ (hiện vòng xoay)
@@ -426,9 +456,8 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
         }
     }
 
-    /**
-     * Show navigation screen in Android Auto
-     */
+
+      //Show navigation screen in Android Auto
     private fun startNavigation(navigationUri: Uri, destination: String) {
         try {
             Log.d("NAV_SCREEN", "Starting navigation: $destination")
@@ -442,4 +471,118 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
             Log.e("NAV_SCREEN", "Error starting navigation: ${e.message}", e)
         }
     }
+
+    // Hàm để lấy vị trí:
+    private fun getCurrentLocation(): Pair<Double, Double>? {
+        try {
+            val location = locationManager?.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+            return if (location != null) {
+                Pair(location.latitude, location.longitude)
+            } else {
+                null
+            }
+        } catch (e: SecurityException) {
+            Log.e("LOCATION_ERROR", "Permission denied: ${e.message}")
+            return null
+        }
+    }
+
+    private suspend fun handleWeatherRequest(){
+        try{
+            updateState(AssistantState.THINKING, "Đang kiểm tra thời tiết...")
+            // 1. Lấy vị trí GPS
+            val location = getCurrentLocation()
+            if (location == null) {
+                updateState(AssistantState.IDLE, "Không thể xác định vị trí. Vui lòng bật GPS.")
+                startPassiveListening()
+                return
+            }
+            // 2. Gọi API thời tiết
+            val weatherData = WeatherManager.getWeather(
+                latitude = location.first,
+                longitude = location.second
+            )
+
+            if (weatherData == null) {
+                updateState(AssistantState.IDLE, "Không thể lấy dữ liệu thời tiết.")
+                startPassiveListening()
+                return
+            }
+
+            // 3. Tạo phản hồi
+            val response = buildWeatherResponse(weatherData)
+
+            // 4. Phát âm thanh
+            updateState(AssistantState.SPEAKING, response)
+            requestAudioFocusAndSpeak(response)
+
+
+        }catch(e: Exception){
+            Log.e("WEATHER_ERROR", "Error: ${e.message}")
+            updateState(AssistantState.IDLE, "Lỗi kiểm tra thời tiết.")
+            startPassiveListening()
+        }
+    }
+    private fun buildWeatherResponse(weather: WeatherManager.WeatherData): String {
+        return """
+        Hôm nay ở vị trí bạn:
+        - Nhiệt độ: ${weather.temp}°C
+        - Cảm giác: ${weather.feelsLike}°C
+        - Tình trạng: ${weather.description}
+        - Độ ẩm: ${weather.humidity}%
+        - Gió: ${weather.windSpeed}m/s
+    """.trimIndent()
+    }
+
+    private suspend fun requestAudioFocusAndSpeak(text: String){
+        withContext(Dispatchers.Main){
+            val audioManger = carContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val audioAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+
+            val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                .setAudioAttributes(audioAttributes)
+                .build()
+
+            val result = audioManger.requestAudioFocus(focusRequest)
+            if(result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED){
+                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "WeatherTTS")
+            }
+
+
+        }
+    }
+
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -24,9 +24,11 @@ android {
 
         //val groqKey = properties.getProperty("GROQ_API_KEY") ?: ""
         val geminiKey = properties.getProperty("GEMINI_API_KEY") ?: ""
+        val weatherKey = properties.getProperty("WEATHER_API_KEY") ?: ""
 
         //buildConfigField("String", "GROQ_API_KEY", "\"$groqKey\"")
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiKey\"")
+        buildConfigField("String", "WEATHER_API_KEY", "\"$weatherKey\"")
     }
 
     buildFeatures {
@@ -53,6 +55,15 @@ android {
 
 dependencies {
 
+
+    // HTTP Request Library
+    implementation("com.squareup.okhttp3:okhttp:4.11.0")
+
+    // JSON parsing
+    implementation("com.google.code.gson:gson:2.10.1")
+
+    // Coroutines
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 
     // Thêm SDK Gemini
     implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
