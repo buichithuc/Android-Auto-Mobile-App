@@ -19,6 +19,10 @@ espressoCore = "3.6.1"
 carApp = "1.4.0"
 gemini = "0.9.0"
 
+# Firebase & Google Services
+firebaseBom = "33.0.0"
+googleSignIn = "21.1.1"
+
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
@@ -29,7 +33,12 @@ material = { group = "com.google.android.material", name = "material", version.r
 androidx-activity = { group = "androidx.activity", name = "activity", version.ref = "activity" }
 androidx-constraintlayout = { group = "androidx.constraintlayout", name = "constraintlayout", version.ref = "constraintlayout" }
 
-# Khai báo sẵn thư viện cho Android Auto và Gemini ở đây để dùng trong build.gradle
+# Firebase (Sử dụng BOM để quản lý version tự động)
+firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebaseBom" }
+firebase-auth = { group = "com.google.firebase", name = "firebase-auth" }
+google-sign-in = { group = "com.google.android.gms", name = "play-services-auth", version.ref = "googleSignIn" }
+
+# Android Auto & Gemini
 androidx-car-app = { group = "androidx.car.app", name = "app", version.ref = "carApp" }
 google-gemini = { group = "com.google.ai.client.generativeai", name = "generativeai", version.ref = "gemini" }
 

@@ -2,6 +2,7 @@ import java.util.Properties
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -57,6 +58,12 @@ android {
 
 dependencies {
 
+    // 1. CHỈ DÙNG 1 BOM DUY NHẤT (Phiên bản ổn định 33.0.0)
+    implementation(platform("com.google.firebase:firebase-bom:33.0.0"))
+
+    // 2. Thư viện Firebase Auth (Không cần ktx, không cần ghi phiên bản vì đã có BOM)
+    implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.android.gms:play-services-auth:21.1.1")
 
     // HTTP Request Library
     implementation("com.squareup.okhttp3:okhttp:4.11.0")
@@ -90,6 +97,7 @@ dependencies {
     implementation(libs.material)
     implementation(libs.androidx.activity)
     implementation(libs.androidx.constraintlayout)
+    implementation(libs.firebase.auth)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
