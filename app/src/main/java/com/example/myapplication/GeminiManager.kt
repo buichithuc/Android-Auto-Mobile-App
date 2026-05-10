@@ -97,14 +97,16 @@ object GeminiManager {
         apiKey = API_KEY,
         generationConfig = generationConfig {
             temperature = 0.7f
-            maxOutputTokens = 500
+            maxOutputTokens = 2000
         },
         // System Prompt
         systemInstruction = content {
             text("Bạn là trợ lý lái xe. " +
+                    "QUAN TRỌNG: Không sử dụng Markdown formatting (**bold**, *italic*, # heading, `code`, [link](url), v.v.) vì câu trả lời sẽ được đọc bằng text-to-speech. " +
+                    "Sử dụng văn bản thuần túy, rõ ràng, không dấu hiệu định dạng đặc biệt. " +
                     "Nếu người dùng muốn đi đâu đó, hãy bắt đầu câu trả lời bằng cụm từ 'NAVIGATE_TO: [tên địa điểm]'. " +
-                    "Ví dụ: 'NAVIGATE_TO: Hồ Hoàn Kiếm. Đang mở bản đồ dẫn bạn đến Hồ Hoàn Kiếm.' " +
-                    "Nếu không phải yêu cầu dẫn đường, hãy trả lời bình thường dưới 4 dòng.")
+                    "Ví dụ: 'NAVIGATE_TO: Hồ Hoàn Kiếm. Đang mở bản đồ dẫn bạn đến Hồ Hoàn Kiếm."
+                    )
         }
     )
 

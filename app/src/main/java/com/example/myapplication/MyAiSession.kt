@@ -65,8 +65,6 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
 
 
 
-
-
     private val messageReceiver = object: BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val sender = intent?.getStringExtra("bundle_sender") ?: "Người dùng ẩn danh"
@@ -373,10 +371,7 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
             return
         }
 
-        if (lowerInput.contains("thời tiết") ||
-            lowerInput.contains("trời") ||
-            lowerInput.contains("mưa") ||
-            lowerInput.contains("nắng")) {
+        if (lowerInput.contains("thời tiết") ){
 
             lifecycleScope.launch {
                 handleWeatherRequest()
@@ -497,6 +492,13 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
                 startPassiveListening()
                 return
             }
+
+            //Lay ten dia diem
+            val locationInfo = WeatherManager.getLocationName(
+                latitude = location.first,
+                longitude = location.second
+            )
+
             // 2. Gọi API thời tiết
             val weatherData = WeatherManager.getWeather(
                 latitude = location.first,
@@ -509,12 +511,13 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
                 return
             }
 
-            // 3. Tạo phản hồi
-            val response = buildWeatherResponse(weatherData)
+            // Tạo response cho display và TTS
+            val displayResponse = buildWeatherResponseForDisplay(weatherData, locationInfo)
+            val ttsResponse = buildWeatherResponseForTTS(weatherData, locationInfo)
 
             // 4. Phát âm thanh
-            updateState(AssistantState.SPEAKING, response)
-            requestAudioFocusAndSpeak(response)
+            updateState(AssistantState.SPEAKING, displayResponse)
+            requestAudioFocusAndSpeak(ttsResponse)
 
 
         }catch(e: Exception){
@@ -523,20 +526,82 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
             startPassiveListening()
         }
     }
-    private fun buildWeatherResponse(weather: WeatherManager.WeatherData): String {
-        return """
-        Hôm nay ở vị trí bạn:
-        - Nhiệt độ: ${weather.temp}°C
-        - Cảm giác: ${weather.feelsLike}°C
-        - Tình trạng: ${weather.description}
-        - Độ ẩm: ${weather.humidity}%
-        - Gió: ${weather.windSpeed}m/s
-    """.trimIndent()
+
+
+    private fun buildWeatherResponseForTTS(
+        weather: WeatherManager.WeatherData,
+        locationInfo: WeatherManager.LocationInfo? = null
+    ): String {
+        val locationLine = if (locationInfo != null) {
+            val locationText = if (locationInfo.district != null) {
+                "${locationInfo.district}"
+            } else {
+                locationInfo.city
+            }
+
+            "Bạn đang ở $locationText. Hôm nay ở đây thời tiết như sau. "
+        } else {
+            "Hôm nay ở vị trí bạn như sau. "
+        }
+
+        // Tạo chuỗi thân thiện để phát TTS
+        return buildString {
+            append(locationLine)
+
+            // Nhiệt độ
+            append("Nhiệt độ ${weather.temp} độ C. ")
+
+            // Cảm giác
+            append("Cảm giác như ${weather.feelsLike} độ C. ")
+
+            // Tình trạng
+            append("Tình trạng: ${weather.description}. ")
+
+            // Độ ẩm
+            append("Độ ẩm ${weather.humidity} phần trăm. ")
+
+            // Gió
+            val windLevel = when {
+                weather.windSpeed < 2 -> "rất nhẹ"
+                weather.windSpeed < 5 -> "nhẹ"
+                weather.windSpeed < 10 -> "vừa phải"
+                else -> "mạnh"
+            }
+            append("Gió $windLevel, khoảng ${String.format("%.1f", weather.windSpeed)} mét trên giây.")
+        }
     }
+
+    private fun buildWeatherResponseForDisplay(
+        weather: WeatherManager.WeatherData,
+        locationInfo: WeatherManager.LocationInfo? = null
+    ): String {
+        val locationLine = if (locationInfo != null) {
+            val locationText = if (locationInfo.district != null) {
+                "${locationInfo.district}"
+            } else {
+                locationInfo.city
+            }
+
+            "Bạn đang ở $locationText.\nHôm nay ở đây:\n"
+        } else {
+            "Hôm nay:\n"
+        }
+
+        // Tạo chuỗi hiển thị (display trên car screen nếu có)
+        return buildString {
+            append(locationLine)
+            append("• Nhiệt độ: ${weather.temp}°C (cảm giác ${weather.feelsLike}°C)\n")
+            append("• Tình trạng: ${weather.description}\n")
+            append("• Độ ẩm: ${weather.humidity}%\n")
+            append("• Gió: ${weather.windSpeed}m/s")
+        }
+    }
+
+
 
     private suspend fun requestAudioFocusAndSpeak(text: String){
         withContext(Dispatchers.Main){
-            val audioManger = carContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val audioManager = carContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
             val audioAttributes = AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
@@ -546,7 +611,7 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
                 .setAudioAttributes(audioAttributes)
                 .build()
 
-            val result = audioManger.requestAudioFocus(focusRequest)
+            val result = audioManager.requestAudioFocus(focusRequest)
             if(result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED){
                 tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "WeatherTTS")
             }

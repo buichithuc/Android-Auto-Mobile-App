@@ -25,10 +25,12 @@ android {
         //val groqKey = properties.getProperty("GROQ_API_KEY") ?: ""
         val geminiKey = properties.getProperty("GEMINI_API_KEY") ?: ""
         val weatherKey = properties.getProperty("WEATHER_API_KEY") ?: ""
+        val googleKey = properties.getProperty("GOOGLE_API_KEY") ?: ""
 
         //buildConfigField("String", "GROQ_API_KEY", "\"$groqKey\"")
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiKey\"")
         buildConfigField("String", "WEATHER_API_KEY", "\"$weatherKey\"")
+        buildConfigField("String", "GOOGLE_API_KEY", "\"$googleKey\"")
     }
 
     buildFeatures {

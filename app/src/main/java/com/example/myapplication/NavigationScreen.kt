@@ -8,10 +8,6 @@ import androidx.car.app.model.Action
 import androidx.car.app.model.MessageTemplate
 import androidx.car.app.model.Template
 
-/**
- * Navigation screen showing destination information in Android Auto
- * Maps is launched separately from MyAiSession
- */
 class NavigationScreen(
     carContext: CarContext,
     private val destination: String
