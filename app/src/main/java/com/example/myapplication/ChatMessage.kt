@@ -1,8 +1,8 @@
 package com.example.myapplication
 
 data class ChatMessage(
-    val text: String,
-    val isUser: Boolean,
+    val text: String = "",
+    val isUser: Boolean = true,
     val timestamp: Long = System.currentTimeMillis()
 )
 

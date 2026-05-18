@@ -1,7 +1,7 @@
 [versions]
 # Hạ AGP về bản mà Android Studio của bạn hỗ trợ
 agp = "8.8.2"
-kotlin = "1.9.24"
+kotlin = "2.1.0"
 
 # Hạ các thư viện AndroidX để không bị ép dùng SDK 36
 coreKtx = "1.15.0"
@@ -22,6 +22,8 @@ gemini = "0.9.0"
 # Firebase & Google Services
 firebaseBom = "33.0.0"
 googleSignIn = "21.1.1"
+firebaseFirestoreKtx = "26.3.0"
+foundationAndroid = "1.11.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -41,6 +43,8 @@ google-sign-in = { group = "com.google.android.gms", name = "play-services-auth"
 # Android Auto & Gemini
 androidx-car-app = { group = "androidx.car.app", name = "app", version.ref = "carApp" }
 google-gemini = { group = "com.google.ai.client.generativeai", name = "generativeai", version.ref = "gemini" }
+firebase-firestore-ktx = { group = "com.google.firebase", name = "firebase-firestore-ktx", version.ref = "firebaseFirestoreKtx" }
+androidx-foundation-android = { group = "androidx.compose.foundation", name = "foundation-android", version.ref = "foundationAndroid" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

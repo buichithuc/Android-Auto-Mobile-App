@@ -136,4 +136,30 @@ object GeminiManager {
     fun clearChatHistory() {
         chatSession = model.startChat(history = emptyList())
     }
+
+    suspend fun resumeChatSession(history: List<ChatMessage>) {
+        // Chuyển đổi toàn bộ mảng ChatMessage từ Firestore thành định dạng Content mà Gemini SDK yêu cầu
+        val geminiHistory = history.map {msg ->
+            content(role = if(msg.isUser) "user" else "model"){
+                text(msg.text)
+            }
+        }
+        // Khởi tạo đè một phiên chat mới nhưng có nạp sẵn toàn bộ lịch sử hội thoại trước đó
+        chatSession = model.startChat(history = geminiHistory)
+        Log.d("GEMINI_DEBUG", "Đã nạp thành công ${history.size} tin nhắn vào ngữ cảnh mới.")
+
+
+    }
 }
+
+
+
+
+
+
+
+
+
+
+
+

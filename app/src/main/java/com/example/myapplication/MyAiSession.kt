@@ -26,6 +26,10 @@ import android.net.Uri
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.google.firebase.Firebase
+import com.google.firebase.auth.auth
+import com.google.firebase.firestore.firestore
+import com.google.firebase.firestore.Query
 
 
 enum class AssistantState {
@@ -42,14 +46,14 @@ enum class AssistantState {
 // SESSION
 class MyAiSession : Session() {
     override fun onCreateScreen(intent: Intent): Screen {
-        return MyAiScreen(carContext)
+        return ConversationListScreen(carContext)
     }
 }
 
 // SCREEN (GIAO DIỆN & LOGIC)
-class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnInitListener {
-    private var currentState = AssistantState.IDLE
-    private var displayMessage = "Chào bạn! tôi có thể giúp gì cho bạn"
+class MyAiScreen(carContext: CarContext, private val sessionId: String? = null) : Screen(carContext), TextToSpeech.OnInitListener {
+    private var currentState = if (sessionId != null) AssistantState.STARTING else AssistantState.IDLE
+    private var displayMessage = if (sessionId != null) "Đang đồng bộ dữ liệu cuộc trò chuyện..." else "Chào bạn! tôi có thể giúp gì cho bạn"
     private var tts: TextToSpeech? = null
     private var pendingNavDestination: String? = null
     private var pendingNavUri: Uri? = null
@@ -62,6 +66,8 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
     private var locationManager: LocationManager? = null
     private var currentLatitude: Double? = null
     private var currentLongitude: Double? = null
+
+
 
 
 
@@ -106,7 +112,7 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
             override fun onStart(owner: androidx.lifecycle.LifecycleOwner) {
                 val filter = IntentFilter("COM_EXAMPLE_NEW_MESSAGE")
 
-                // Với Android 14 trên máy realme của bạn, cần flag RECEIVER_EXPORTED
+                // Với Android 14 cần flag RECEIVER_EXPORTED
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
                     carContext.registerReceiver(messageReceiver, filter, Context.RECEIVER_EXPORTED)
                 } else {
@@ -118,6 +124,10 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
                     )
                 }
                 Log.d("AI_DEBUG", "Đã đăng ký lắng nghe tin nhắn")
+
+                if (sessionId != null) {
+                    loadConversationContext(sessionId)
+                }
                 
                 // Process pending navigation after screen starts (TTS should be ready by then)
                 if (pendingNavDestination != null && tts != null && pendingNavUri != null) {
@@ -619,6 +629,34 @@ class MyAiScreen(carContext: CarContext) : Screen(carContext), TextToSpeech.OnIn
 
         }
     }
+
+    private fun loadConversationContext(id: String){
+        val uid = Firebase.auth.currentUser?.uid ?: return
+
+        updateState(AssistantState.STARTING, "Đang đồng bộ dữ liệu cuộc trò chuyện...")
+        Firebase.firestore.collection("users").document(uid)
+            .collection("sessions").document(id)
+            .collection("messages")
+            .orderBy("timestamp", Query.Direction.ASCENDING)
+            .get()
+            .addOnSuccessListener{docs ->
+                val history = docs.toObjects(ChatMessage::class.java)
+
+                lifecycleScope.launch {
+                    GeminiManager.resumeChatSession(history)
+
+                    updateState(AssistantState.IDLE, "Đã đồng bộ cuộc trò chuyện cũ. Mời bạn nói.")
+                    tts?.speak("Đã kết nối dữ liệu đám mây. Tôi sẵn sàng lắng nghe câu hỏi tiếp theo", TextToSpeech.QUEUE_FLUSH, null, "ResumeSuccessTTS")
+                    startPassiveListening()
+                }
+            }
+            .addOnFailureListener { e ->
+                Log.e("FIRESTORE_RESUME_ERROR", "Lỗi nạp ngữ cảnh: ${e.message}")
+                updateState(AssistantState.IDLE, "Không thể kết nối dữ liệu cũ. Hãy thử lại.")
+                startPassiveListening()
+            }
+    }
+
 
 }
 

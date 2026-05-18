@@ -58,46 +58,35 @@ android {
 
 dependencies {
 
-    // 1. CHỈ DÙNG 1 BOM DUY NHẤT (Phiên bản ổn định 33.0.0)
+    // 1. Hệ thống Firebase với BOM (Quản lý tập trung, chống xung đột phiên bản)
     implementation(platform("com.google.firebase:firebase-bom:33.0.0"))
-
-    // 2. Thư viện Firebase Auth (Không cần ktx, không cần ghi phiên bản vì đã có BOM)
+    implementation("com.google.firebase:firebase-firestore") // Chuẩn mới không cần -ktx
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.android.gms:play-services-auth:21.1.1")
 
-    // HTTP Request Library
+    // 2. Mạng và Khai triển API (Đã xóa bỏ hoàn toàn các dòng OkHttp trùng lặp)
     implementation("com.squareup.okhttp3:okhttp:4.11.0")
-
-    // JSON parsing
-    implementation("com.google.code.gson:gson:2.10.1")
-
-    // Coroutines
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
-
-    // Thêm SDK Gemini
-    implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
-    // Android for Cars App Library (Để chạy trên ô tô)
-    implementation("androidx.car.app:app:1.4.0-rc01")
-    // HTTP Client (Để kết nối Groq API)
-    implementation("com.squareup.okhttp3:okhttp:4.11.0")
-
-    // HTTP Client (OkHttp làm nền tảng)
-    implementation("com.squareup.okhttp3:okhttp:4.11.0")
-
-    // Các thư viện hỗ trợ xử lý giọng nói và âm thanh
-    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
-
-    // --- THÊM RETROFIT & GSON Ở ĐÂY ---
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
     implementation("com.squareup.retrofit2:converter-gson:2.11.0")
+    implementation("com.google.code.gson:gson:2.10.1")
 
+    // 3. Luồng bất đồng bộ và Vòng đời (Đã dọn dẹp trùng lặp)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0")
+
+    // 4. Các Core SDK phục vụ tính năng AI & Ô tô của đồ án
+    implementation("com.google.ai.client.generativeai:generativeai:0.9.0") // Gemini API
+    implementation("androidx.car.app:app:1.4.0-rc01") // Android Auto Component
+
+    // 5. Thư viện Giao diện nền tảng (Giữ lại từ Version Catalog, ĐÃ XÓA dòng Firebase trùng lặp)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
     implementation(libs.androidx.activity)
     implementation(libs.androidx.constraintlayout)
-    implementation(libs.firebase.auth)
+    implementation(libs.androidx.foundation.android)
+
+    // 6. Bộ công cụ kiểm thử (Testing)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
