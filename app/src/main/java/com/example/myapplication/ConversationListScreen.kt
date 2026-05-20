@@ -47,9 +47,17 @@ class ConversationListScreen(carContext: CarContext) : Screen(carContext) {
     override fun onGetTemplate(): Template {
         val listBuilder = ItemList.Builder()
 
-        if (sessions.isEmpty()) {
-            listBuilder.setNoItemsMessage("Không có cuộc trò chuyện nào gần đây")
-        } else {
+        listBuilder.addItem(
+            Row.Builder()
+                .setTitle("+ Cuộc trò chuyện mới")
+                .addText("Bắt đầu một phiên thảo luận hoàn toàn mới với trợ lý AI")
+                .setOnClickListener {
+                    // Kích hoạt màn hình AI Screen và truyền vào 'null' để tạo luồng hội thoại mới tinh
+                    screenManager.push(MyAiScreen(carContext, null))
+                }
+                .build()
+        )
+
             sessions.forEach { session ->
                 listBuilder.addItem(
                     Row.Builder()
@@ -62,7 +70,7 @@ class ConversationListScreen(carContext: CarContext) : Screen(carContext) {
                 )
 
             }
-        }
+
         return ListTemplate.Builder()
             .setLoading(false) // dùng SnapshotListener nên có thể quản lý loading tinh tế hơn
             .setTitle("Tiếp tục hội thoại")
