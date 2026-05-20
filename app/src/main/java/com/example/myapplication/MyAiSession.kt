@@ -69,8 +69,6 @@ class MyAiScreen(carContext: CarContext, private val sessionId: String? = null) 
 
 
 
-
-
     private val messageReceiver = object: BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val sender = intent?.getStringExtra("bundle_sender") ?: "Người dùng ẩn danh"
@@ -382,7 +380,6 @@ class MyAiScreen(carContext: CarContext, private val sessionId: String? = null) 
         }
 
         if (lowerInput.contains("thời tiết") ){
-
             lifecycleScope.launch {
                 handleWeatherRequest()
             }

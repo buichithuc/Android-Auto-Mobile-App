@@ -147,8 +147,6 @@ object GeminiManager {
         // Khởi tạo đè một phiên chat mới nhưng có nạp sẵn toàn bộ lịch sử hội thoại trước đó
         chatSession = model.startChat(history = geminiHistory)
         Log.d("GEMINI_DEBUG", "Đã nạp thành công ${history.size} tin nhắn vào ngữ cảnh mới.")
-
-
     }
 }
 

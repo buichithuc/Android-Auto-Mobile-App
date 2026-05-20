@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
+import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.firestore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -11,19 +12,83 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 
 class ChatViewModel : ViewModel() {
-    // 1. Khởi tạo các đối tượng kết nối Firebase
+    // Khởi tạo các đối tượng kết nối Firebase
     private val db = Firebase.firestore
     private val auth = Firebase.auth
 
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages
 
+    // Danh sách các phiên chat hiển thị lên thanh trượt Sidebar
+    private val _sessions = MutableStateFlow<List<SessionMetadata>>(emptyList())
+    val sessions: StateFlow<List<SessionMetadata>> = _sessions
+
     private val _isTyping = MutableStateFlow(false)
     val isTyping: StateFlow<Boolean> = _isTyping
 
-    // 2. Tạo ID ngẫu nhiên cho phiên chat hiện tại trên điện thoại
+    // Tạo ID ngẫu nhiên cho phiên chat hiện tại trên điện thoại
     private var currentSessionId: String = UUID.randomUUID().toString()
     private var isNewSession = true
+
+    init {
+        loadAllSessions()
+    }
+
+    // Lắng nghe thời gian thực danh sách cuộc hội thoại của User
+    private fun loadAllSessions() {
+        val uid = auth.currentUser?.uid ?: return
+        db.collection("users").document(uid).collection("sessions")
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .addSnapshotListener { value, error ->
+                if(error != null) return@addSnapshotListener
+                val list = mutableListOf<SessionMetadata>()
+                value?.documents?.forEach{ doc ->
+                    val session = doc.toObject(SessionMetadata::class.java)?.copy(id = doc.id)
+                    if(session != null) list.add(session)
+                }
+                _sessions.value = list
+            }
+    }
+
+    // Chọn một cuộc hội thoại cũ -> Kéo tin nhắn về hiển thị lên màn hình
+    fun selectSession(sessionId: String){
+        val uid = auth.currentUser?.uid ?: return
+        currentSessionId = sessionId
+        isNewSession = false
+
+        db.collection("users").document(uid)
+            .collection("sessions").document(sessionId)
+            .collection("messages")
+            .orderBy("timestamp", Query.Direction.ASCENDING)
+            .get()
+            .addOnSuccessListener { docs ->
+                val parsedMessages = docs.toObjects(ChatMessage::class.java)
+                _messages.value = parsedMessages
+                viewModelScope.launch {
+                    GeminiManager.resumeChatSession(parsedMessages) // Đồng bộ não bộ Gemini cục bộ
+                }
+            }
+
+    }
+
+    fun startNewChatSession(){
+        currentSessionId = UUID.randomUUID().toString()
+        isNewSession = true
+        _messages.value = emptyList()
+        GeminiManager.clearChatHistory()
+    }
+
+    fun deleteSession(sessionId: String){
+        val uid = auth.currentUser?.uid ?: return
+
+        db.collection("users").document(uid).collection("sessions").document(sessionId)
+            .delete()
+            .addOnSuccessListener {
+                if (currentSessionId == sessionId) {
+                    startNewChatSession()
+                }
+            }
+    }
 
     fun sendMessage(content: String) {
         val textTrimmed = content.trim()
@@ -32,7 +97,7 @@ class ChatViewModel : ViewModel() {
             val uid = auth.currentUser?.uid ?: return
             val currentTime = System.currentTimeMillis()
 
-            // BƯỚC A: Nếu là câu hỏi đầu tiên của phiên, tạo ngay Document Session trên Cloud
+            // Nếu là câu hỏi đầu tiên của phiên, tạo ngay Document Session trên Cloud
             if (isNewSession) {
                 val sessionTitle = if (textTrimmed.length > 25) textTrimmed.take(25) + "..." else textTrimmed
                 val sessionData = hashMapOf(
@@ -46,7 +111,7 @@ class ChatViewModel : ViewModel() {
                 isNewSession = false
             }
 
-            // BƯỚC B: Lưu tin nhắn của Người dùng lên UI và Cloud Firestore
+            //  Lưu tin nhắn của Người dùng lên UI và Cloud Firestore
             val userMsg = ChatMessage(textTrimmed, true, currentTime)
             _messages.value = _messages.value + userMsg
 
@@ -57,7 +122,7 @@ class ChatViewModel : ViewModel() {
             // Bật hiệu ứng AI đang gõ
             _isTyping.value = true
 
-            // BƯỚC C: Gọi Gemini AI xử lý bất đồng bộ
+            // Gọi Gemini AI xử lý bất đồng bộ
             viewModelScope.launch {
                 try {
                     val response = GeminiManager.chatWithAI(textTrimmed)
