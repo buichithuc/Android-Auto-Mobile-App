@@ -1,83 +1,5 @@
 package com.example.myapplication
 
-//import kotlinx.coroutines.Dispatchers
-//import kotlinx.coroutines.withContext
-//import retrofit2.Response
-//import retrofit2.Retrofit
-//import retrofit2.converter.gson.GsonConverterFactory
-//import retrofit2.http.Body
-//import retrofit2.http.Header
-//import retrofit2.http.POST
-//import com.example.myapplication.BuildConfig
-
-
-//data class Message(val role: String, val content: String)
-//data class GroqRequest(
-//    val model: String,
-//    val messages: List<Message>,
-//    val max_tokens: Int = 150,
-//    val temperature: Double = 0.7
-//)
-//
-//data class GroqResponse(val choices: List<Choice>)
-//data class Choice(val message: Message)
-//
-//interface GroqApiService {
-//    @POST("chat/completions")
-//    suspend fun chatWithAI(
-//        @Header("Authorization") authHeader: String,
-//        @Body requestBody: GroqRequest
-//    ): GroqResponse
-//}
-//
-//object GroqManager {
-//    private val API_KEY = BuildConfig.GROQ_API_KEY
-//    private const val BASE_URL = "https://api.groq.com/openai/v1/"
-//    private const val MODEL_NAME = "llama-3.1-8b-instant"
-//
-//    private val retrofit = Retrofit.Builder()
-//        .baseUrl(BASE_URL)
-//        .addConverterFactory(GsonConverterFactory.create()) // biến json từ server thành đối tượng kotlin hiểu
-//        .build()
-//
-//    private val service = retrofit.create(GroqApiService::class.java) //đối tượng thực tế có khả năng thực hiện các cuộc gọi mạng đến AI của Groq.
-//
-//    suspend fun chatWithAI(userInput: String): String {
-//        if (userInput.isBlank()) {
-//            return "Tôi chưa nghe thấy câu hỏi"
-//        }
-//
-//        return withContext(Dispatchers.IO) {
-//            try {
-//                val request = GroqRequest(
-//                    model = MODEL_NAME,
-//                    messages = listOf(
-//                        Message(
-//                            "system",
-//                            "Bạn là trợ lý lái xe. Nếu có nhiều ý, hãy trả lời bằng cách xuống dòng và dùng dấu gạch đầu dòng. Trả lời dưới 4 dòng."
-//                        ),
-//                        Message("user", userInput)
-//                    )
-//                )
-//
-//                val response = service.chatWithAI("Bearer $API_KEY", request)
-//                response.choices.firstOrNull()?.message?.content ?: "AI không có phản hồi"
-//            } catch (e: Exception) {
-//                e.printStackTrace()
-//
-//                // Categorize errors
-//                val msg = e.localizedMessage ?: ""
-//                when {
-//                    msg.contains("401") -> "Lỗi: API Key không hợp lệ"
-//                    msg.contains("429") -> "Lỗi: Hết hạn mức request (Rate limit)"
-//                    else -> "Lỗi kết nối: Không thể gọi AI."
-//                }
-//            }
-//        }
-//    }
-//}
-
-
 import android.util.Log
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.content
@@ -85,56 +7,89 @@ import com.google.ai.client.generativeai.type.generationConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.example.myapplication.BuildConfig
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 
 
 object GeminiManager {
     private const val API_KEY = BuildConfig.GEMINI_API_KEY // Lấy key từ Google AI Studio
-    private const val MODEL_NAME = "gemini-2.5-flash" // Bản Flash cực nhanh cho ô tô
 
-    // Cấu hình mô hình
-    private val model = GenerativeModel(
-        modelName = MODEL_NAME,
-        apiKey = API_KEY,
-        generationConfig = generationConfig {
-            temperature = 0.7f
-            maxOutputTokens = 2000
-        },
-        // System Prompt
-        systemInstruction = content {
-            text("Bạn là trợ lý lái xe. " +
-                    "QUAN TRỌNG: Không sử dụng Markdown formatting (**bold**, *italic*, # heading, `code`, [link](url), v.v.) vì câu trả lời sẽ được đọc bằng text-to-speech. " +
-                    "Sử dụng văn bản thuần túy, rõ ràng, không dấu hiệu định dạng đặc biệt. " +
-                    "Nếu người dùng muốn đi đâu đó, hãy bắt đầu câu trả lời bằng cụm từ 'NAVIGATE_TO: [tên địa điểm]'. " +
-                    "Ví dụ: 'NAVIGATE_TO: Hồ Hoàn Kiếm. Đang mở bản đồ dẫn bạn đến Hồ Hoàn Kiếm."
-                    )
+    private const val TIER_1_MODEL = "gemini-3.1-flash-lite"
+    private const val TIER_2_MODEL = "gemini-2.5-flash-lite"
+    private const val TIER_3_MODEL = "gemini-3.5-flash"
+
+
+    private val sharedConfig = generationConfig {
+        temperature = 0.7f
+        maxOutputTokens = 2000
+    }
+
+    private val sharedSystemPrompt = content {
+        text("Bạn là trợ lý lái xe. " +
+                "QUAN TRỌNG: Không sử dụng Markdown formatting (**bold**, *italic*, # heading, `code`, [link](url), v.v.). " +
+                "Sử dụng văn bản thuần túy, rõ ràng. " +
+                "Nếu người dùng muốn đi đâu đó, hãy bắt đầu câu trả lời bằng cụm từ 'NAVIGATE_TO: [tên địa điểm]'.")
+    }
+
+
+    private val tier1Model = GenerativeModel(modelName = TIER_1_MODEL, apiKey = API_KEY, generationConfig = sharedConfig, systemInstruction = sharedSystemPrompt)
+    private val tier2Model = GenerativeModel(modelName = TIER_2_MODEL, apiKey = API_KEY, generationConfig = sharedConfig, systemInstruction = sharedSystemPrompt)
+    private val tier3Model = GenerativeModel(modelName = TIER_3_MODEL, apiKey = API_KEY, generationConfig = sharedConfig, systemInstruction = sharedSystemPrompt)
+
+    private var chatSession = tier1Model.startChat(history = emptyList())
+
+    suspend fun chatWithAIStream(userInput: String): Flow<String> = flow {
+        if (userInput.isBlank()) {
+            emit("Tôi chưa nghe thấy câu hỏi")
+            return@flow
         }
-    )
 
-    private var chatSession = model.startChat(history = emptyList())
-
-    suspend fun chatWithAI(userInput: String): String {
-        if (userInput.isBlank()) return "Tôi chưa nghe thấy câu hỏi"
-
-        return withContext(Dispatchers.IO) {
             try {
-                val response = chatSession.sendMessage(userInput)
-                response.text ?: "AI không có phản hồi" // Giá trị trả về nếu thành công
+                val responseStream = chatSession.sendMessageStream(userInput)
+                responseStream.collect{ chunk ->
+                    chunk.text?.let{ emit(it) }
+                }
             } catch (e: Exception) {
                 Log.e("GEMINI_DEBUG", "Lỗi chi tiết: ${e.message}")
                 e.printStackTrace()
 
                 val errorMsg = e.message ?: ""
-                when {
-                    // Xử lý riêng lỗi MAX_TOKENS để tài xế vẫn nhận được thông tin
-                    errorMsg.contains("MAX_TOKENS") -> "Câu trả lời hơi dài, nhưng ý chính là: (Vui lòng thử lại với câu hỏi hẹp hơn)"
-                    errorMsg.contains("SAFETY") -> "Vì lý do an toàn, tôi không thể trả lời câu hỏi này khi bạn đang lái xe."
-                    else -> "Lỗi kết nối: AI đang bận một chút."
+                // Bắt các lỗi do nội dung (An toàn, Max Tokens) -> Không cần đổi server
+                if (errorMsg.contains("SAFETY") || errorMsg.contains("MAX_TOKENS")) {
+                    emit("Vì lý do an toàn hoặc dữ liệu quá dài, tôi không thể xử lý câu này.")
+                    return@flow
                 }
+                Log.w("GEMINI_DEBUG", "Tier 1 ($TIER_1_MODEL) nghẽn! Đẩy luồng sang Tier 2 ($TIER_2_MODEL) để giữ tốc độ...")
+
+                try{
+                    val sessionTier2 = tier2Model.startChat(history = chatSession.history)
+                    val responseStreamTier2 = sessionTier2.sendMessageStream(userInput)
+                    responseStreamTier2.collect { chunk ->
+                        chunk.text?.let { emit(it) }
+                    }
+                    chatSession = tier1Model.startChat(history = sessionTier2.history)
+
+
+                }catch(e2 : Exception){
+                    Log.w("GEMINI_DEBUG", "Cụm Lite sập toàn tập! Đánh thức Trùm cuối Tier 3 ($TIER_3_MODEL) gánh hệ thống...")
+                    try{
+                        val sessionTier3 = tier3Model.startChat(history = chatSession.history)
+                        val responseStreamTier3 = sessionTier3.sendMessageStream(userInput)
+
+                        responseStreamTier3.collect { chunk ->
+                            chunk.text?.let { emit(it) }
+                        }
+                        chatSession = tier1Model.startChat(history = sessionTier3.history)
+                    }catch(e3: Exception){
+                        emit("Hiện tại toàn bộ hệ thống AI đang quá tải. Xin bạn vui lòng thử lại sau ít phút nhé!")
+                    }
+                }
+
             }
         }
-    }
+
     fun clearChatHistory() {
-        chatSession = model.startChat(history = emptyList())
+        chatSession = tier1Model.startChat(history = emptyList())
     }
 
     suspend fun resumeChatSession(history: List<ChatMessage>) {
@@ -145,7 +100,7 @@ object GeminiManager {
             }
         }
         // Khởi tạo đè một phiên chat mới nhưng có nạp sẵn toàn bộ lịch sử hội thoại trước đó
-        chatSession = model.startChat(history = geminiHistory)
+        chatSession = tier1Model.startChat(history = geminiHistory)
         Log.d("GEMINI_DEBUG", "Đã nạp thành công ${history.size} tin nhắn vào ngữ cảnh mới.")
     }
 }

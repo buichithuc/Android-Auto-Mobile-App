@@ -2,6 +2,7 @@ package com.example.myapplication
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.room.util.copy
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.Query
@@ -62,8 +63,18 @@ class ChatViewModel : ViewModel() {
             .orderBy("timestamp", Query.Direction.ASCENDING)
             .get()
             .addOnSuccessListener { docs ->
-                val parsedMessages = docs.toObjects(ChatMessage::class.java)
+                val parsedMessages = docs.documents.map { doc ->
+                    val text = doc.getString("text") ?: ""
+                    val timestamp = doc.getLong("timestamp") ?: 0L
+
+                    // Bắt bằng được biến boolean.
+                    val isUser = doc.getBoolean("isUser") ?: doc.getBoolean("user") ?: true
+
+                    ChatMessage(text, isUser, timestamp)
+                }
+
                 _messages.value = parsedMessages
+
                 viewModelScope.launch {
                     GeminiManager.resumeChatSession(parsedMessages) // Đồng bộ não bộ Gemini cục bộ
                 }
@@ -125,22 +136,33 @@ class ChatViewModel : ViewModel() {
             // Gọi Gemini AI xử lý bất đồng bộ
             viewModelScope.launch {
                 try {
-                    val response = GeminiManager.chatWithAI(textTrimmed)
                     val aiTime = System.currentTimeMillis()
-                    val aiMsg = ChatMessage(response, false, aiTime)
+                    var fullResponse = ""
+                    _messages.value = _messages.value + ChatMessage("", false, aiTime)
 
-                    // Cập nhật UI cục bộ hiển thị tin nhắn AI
-                    _messages.value = _messages.value + aiMsg
+
+                    GeminiManager.chatWithAIStream(textTrimmed).collect{ chunk ->
+                        fullResponse += chunk
+
+                        val currentList = _messages.value.toMutableList()
+                        val lastIndex = currentList.size - 1
+                        currentList[lastIndex] = currentList[lastIndex].copy(text = fullResponse)
+                        _messages.value = currentList
+
+
+                    }
+
+                    val finalAiMsg = ChatMessage(fullResponse, false, aiTime)
 
                     // Lưu tin nhắn của AI trả về lên Cloud Firestore
                     db.collection("users").document(uid)
                         .collection("sessions").document(currentSessionId)
-                        .collection("messages").add(aiMsg)
+                        .collection("messages").add(finalAiMsg)
 
                     // Cập nhật lại thời gian của Session để ô tô luôn quét được cuộc chat này lên đầu danh sách
                     db.collection("users").document(uid)
                         .collection("sessions").document(currentSessionId)
-                        .update("timestamp", aiTime)
+                        .update("timestamp", System.currentTimeMillis())
 
                 } catch (e: Exception) {
                     _messages.value = _messages.value + ChatMessage("Lỗi kết nối AI.", false, System.currentTimeMillis())

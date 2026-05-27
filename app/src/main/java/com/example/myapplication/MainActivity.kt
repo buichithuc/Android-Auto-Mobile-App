@@ -21,10 +21,11 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.navigation.NavigationView
+import com.google.android.material.textfield.TextInputEditText
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import kotlinx.coroutines.launch
-
+import androidx.core.widget.addTextChangedListener
 
 class MainActivity : AppCompatActivity() {
     private val viewModel: ChatViewModel by viewModels()
@@ -37,6 +38,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var drawerLayout: DrawerLayout
     private lateinit var navigationView: NavigationView
     private lateinit var toolbar: MaterialToolbar
+    private lateinit var edtSearchHistory: TextInputEditText
+
+    private var currentSearchKeyword = ""
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -118,6 +122,8 @@ class MainActivity : AppCompatActivity() {
     private fun setupHistorySidebar(){
         rvHistorySessions = findViewById(R.id.rvHistorySessions)
         rvHistorySessions.layoutManager = LinearLayoutManager(this)
+        edtSearchHistory = findViewById(R.id.edtSearchHistory)
+
 
         // Khởi tạo Adapter nhận vào 2 hành động cụ thể khi click vào dòng lịch sử
         historyAdapter = HistorySessionAdapter(
@@ -132,6 +138,12 @@ class MainActivity : AppCompatActivity() {
             }
         )
         rvHistorySessions.adapter = historyAdapter
+        edtSearchHistory.addTextChangedListener{ editable ->
+            currentSearchKeyword = editable?.toString()?.trim()?.lowercase() ?: ""
+
+            filterAndSubmitSessions(viewModel.sessions.value)
+
+        }
 
     }
 
@@ -156,6 +168,19 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+
+    private fun filterAndSubmitSessions(fullList: List<SessionMetadata>){
+        if(currentSearchKeyword.isEmpty()){
+            historyAdapter.submitList(fullList)
+        }else{
+            val filtered = fullList.filter{ session ->
+                session.title.lowercase().contains(currentSearchKeyword)
+            }
+            historyAdapter.submitList(filtered)
+        }
+    }
+
+
 
     // Hàm hiển thị hộp thoại xác nhận xóa hội thoại trên Đám mây
     private fun showDeleteConfirmDialog(session: SessionMetadata) {

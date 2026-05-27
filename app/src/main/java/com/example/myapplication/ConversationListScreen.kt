@@ -73,7 +73,7 @@ class ConversationListScreen(carContext: CarContext) : Screen(carContext) {
 
         return ListTemplate.Builder()
             .setLoading(false) // dùng SnapshotListener nên có thể quản lý loading tinh tế hơn
-            .setTitle("Tiếp tục hội thoại")
+            .setTitle("AI Assistant - Chọn hội thoại")
             .setSingleList(listBuilder.build())
             .setHeaderAction(Action.APP_ICON)
             .build()

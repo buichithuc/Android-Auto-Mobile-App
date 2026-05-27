@@ -85,6 +85,7 @@ dependencies {
     implementation(libs.androidx.activity)
     implementation(libs.androidx.constraintlayout)
     implementation(libs.androidx.foundation.android)
+    implementation(libs.androidx.room.runtime.android)
 
     // 6. Bộ công cụ kiểm thử (Testing)
     testImplementation(libs.junit)

@@ -42,7 +42,6 @@ enum class AssistantState {
 }
 
 
-
 // SESSION
 class MyAiSession : Session() {
     override fun onCreateScreen(intent: Intent): Screen {
@@ -67,6 +66,10 @@ class MyAiScreen(carContext: CarContext, private val sessionId: String? = null) 
     private var currentLatitude: Double? = null
     private var currentLongitude: Double? = null
 
+    private var activeSessionId = sessionId ?: java.util.UUID.randomUUID().toString()
+    private var isNewSession = (sessionId == null)
+    private val db = com.google.firebase.Firebase.firestore
+    private val auth = com.google.firebase.Firebase.auth
 
 
     private val messageReceiver = object: BroadcastReceiver() {
@@ -81,7 +84,6 @@ class MyAiScreen(carContext: CarContext, private val sessionId: String? = null) 
             }
         }
     }
-
 
 
     init {
@@ -370,7 +372,6 @@ class MyAiScreen(carContext: CarContext, private val sessionId: String? = null) 
     private fun processWithAI(input: String) {
         val lowerInput = input.lowercase()
 
-
         if(lowerInput.contains("xóa lịch sử") || lowerInput.contains("làm mới cuộc trò chuyện")){
             GeminiManager.clearChatHistory()
             updateState(AssistantState.IDLE, "Lịch sử trò chuyện đã được làm mới.")
@@ -389,13 +390,49 @@ class MyAiScreen(carContext: CarContext, private val sessionId: String? = null) 
 
         lifecycleScope.launch {
             try {
+
+                val uid = auth.currentUser?.uid
+                if(uid == null){
+                    updateState(AssistantState.IDLE, "Vui lòng đăng nhập trên điện thoại để tiếp tục")
+                    tts?.speak("Bạn đã đăng xuất. Vui lòng đăng nhập trên ứng dụng điện thoại để sử dụng AI.", TextToSpeech.QUEUE_FLUSH, null, "LogoutError")
+
+                    startPassiveListening()
+                    return@launch
+                }
+
+                val currentTime = System.currentTimeMillis()
+
                 // Chuyển sang trạng thái SUY NGHĨ (hiện vòng xoay)
                 updateState(AssistantState.THINKING, "Đang suy nghĩ..")
 
-                val aiResponse = GeminiManager.chatWithAI(input)
+                if(isNewSession){
+                    val sessionTitle = if (input.trim().length > 25) input.trim().take(25) + "..." else input.trim()
+                    val sessionData = hashMapOf(
+                        "title" to sessionTitle,
+                        "timestamp" to currentTime
+                    )
+
+                    db.collection("users").document(uid)
+                        .collection("sessions").document(activeSessionId)
+                        .set(sessionData)
+                    isNewSession = false
+                }
+
+                //Lưu câu hỏi của tài xế (Từ Micro ô tô dịch ra) lên Cloud Firestore
+                val userMsg = ChatMessage(input.trim(), true, currentTime)
+                db.collection("users").document(uid)
+                    .collection("sessions").document(activeSessionId)
+                    .collection("messages").add(userMsg)
+
+
+                var fullResponse = ""
+                val ttsBuffer = StringBuilder()
+                var isNavigating = false
+
 
                 val audioManager =
                     carContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
 
                 if(android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                     val audioAttributes = AudioAttributes.Builder()
@@ -411,20 +448,58 @@ class MyAiScreen(carContext: CarContext, private val sessionId: String? = null) 
                     val result = audioManager.requestAudioFocus(focusRequest)
 
                     if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
-                        //Kiểm tra ý định dẫn đường
-                        if (aiResponse.startsWith("NAVIGATE_TO:")) {
-                            val parts = aiResponse.split(".")
-                            val destination = parts[0].replace("NAVIGATE_TO:", "").trim()
-                            val speechText = parts.drop(1).joinToString(".").trim()
-                            updateState(AssistantState.SPEAKING, speechText)
-                            speakAndNavigate(speechText, destination)
-                        } else {
-                            updateState(AssistantState.SPEAKING, aiResponse)
-                            tts?.speak(aiResponse, TextToSpeech.QUEUE_FLUSH, null, "GeminiTTS")
+
+                        GeminiManager.chatWithAIStream(input.trim()).collect{ chunk ->
+                            fullResponse += chunk
+                            ttsBuffer.append(chunk)
+
+                            updateState(AssistantState.SPEAKING, fullResponse)
+
+                            val currentBuffer = ttsBuffer.toString()
+
+                            val lastPunctuationIndex = currentBuffer.indexOfLast { it == '.' || it == '?' || it == '!' || it == '\n' }
+
+                            if(lastPunctuationIndex != -1){
+                                val sentenceToSpeak = currentBuffer.substring(0, lastPunctuationIndex + 1).trim()
+
+                                val cleanSentence = sentenceToSpeak.replace("NAVIGATE_TO:", "").trim()
+
+                                if (sentenceToSpeak.contains("NAVIGATE_TO:") && !isNavigating) {
+                                    isNavigating = true
+                                    val dest = sentenceToSpeak.substringAfter("NAVIGATE_TO:").substringBefore(".").trim()
+                                    if (dest.isNotEmpty()) {
+                                        // Mở bản đồ ngay lập tức, không cần đợi đọc xong
+                                        startNavigation(Uri.parse("geo:0,0?q=${Uri.encode(dest)}"), dest)
+                                    }
+                                }
+
+                                if (cleanSentence.isNotEmpty()) {
+                                    tts?.speak(cleanSentence, TextToSpeech.QUEUE_ADD, null, java.util.UUID.randomUUID().toString())
+                                }
+
+                                ttsBuffer.delete(0, lastPunctuationIndex + 1)
+                            }
                         }
-                    } else {
-                        updateState(AssistantState.IDLE, aiResponse)
+
+                        val leftover = ttsBuffer.toString().trim().replace("NAVIGATE_TO:", "")
+                        if(leftover.isNotEmpty()){
+                            tts?.speak(leftover, TextToSpeech.QUEUE_ADD, null, "FinalChunk")
+                        }
+
+                        val aiTime = System.currentTimeMillis()
+                        val aiMsg = ChatMessage(fullResponse, false, aiTime)
+
+                        // Lưu câu trả lời hoàn chỉnh lên Cloud Firestore
+                        db.collection("users").document(uid)
+                            .collection("sessions").document(activeSessionId)
+                            .collection("messages").add(aiMsg)
+
+                        db.collection("users").document(uid)
+                            .collection("sessions").document(activeSessionId)
+                            .update("timestamp", aiTime)
                     }
+                }else{
+                    updateState(AssistantState.IDLE, "Không thể lấy quyền âm thanh")
                 }
 
             }catch(e: Exception){
@@ -605,7 +680,6 @@ class MyAiScreen(carContext: CarContext, private val sessionId: String? = null) 
     }
 
 
-
     private suspend fun requestAudioFocusAndSpeak(text: String){
         withContext(Dispatchers.Main){
             val audioManager = carContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -628,7 +702,13 @@ class MyAiScreen(carContext: CarContext, private val sessionId: String? = null) 
     }
 
     private fun loadConversationContext(id: String){
-        val uid = Firebase.auth.currentUser?.uid ?: return
+        val uid = Firebase.auth.currentUser?.uid
+        if(uid == null){
+            updateState(AssistantState.IDLE, "Vui lòng đăng nhập để xem lịch sử.")
+            tts?.speak("Không thể tải dữ liệu vì bạn chưa đăng nhập.", TextToSpeech.QUEUE_FLUSH, null, "AuthErrorTTS")
+            startPassiveListening()
+            return
+        }
 
         updateState(AssistantState.STARTING, "Đang đồng bộ dữ liệu cuộc trò chuyện...")
         Firebase.firestore.collection("users").document(uid)
@@ -636,8 +716,14 @@ class MyAiScreen(carContext: CarContext, private val sessionId: String? = null) 
             .collection("messages")
             .orderBy("timestamp", Query.Direction.ASCENDING)
             .get()
-            .addOnSuccessListener{docs ->
-                val history = docs.toObjects(ChatMessage::class.java)
+            .addOnSuccessListener{ docs ->
+
+                val history = docs.documents.map { doc ->
+                    val text = doc.getString("text") ?: ""
+                    val timestamp = doc.getLong("timestamp") ?: 0L
+                    val isUser = doc.getBoolean("isUser") ?: doc.getBoolean("user") ?: true
+                    ChatMessage(text, isUser, timestamp)
+                }
 
                 lifecycleScope.launch {
                     GeminiManager.resumeChatSession(history)
