@@ -3,12 +3,14 @@ package com.example.myapplication
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.os.Bundle
+import android.speech.RecognizerIntent
 import android.view.View
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.Toast
 import android.widget.Toolbar
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -41,6 +43,23 @@ class MainActivity : AppCompatActivity() {
     private lateinit var edtSearchHistory: TextInputEditText
 
     private var currentSearchKeyword = ""
+
+    private val speechLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val data = result.data
+            val results = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            val spokenText = results?.getOrNull(0)
+
+            if (!spokenText.isNullOrEmpty()) {
+                val edtMessage = findViewById<EditText>(R.id.edtMessage)
+                edtMessage.setText(spokenText)
+                // Đẩy con trỏ chuột xuống cuối đoạn văn bản vừa nhập
+                edtMessage.setSelection(spokenText.length)
+            }
+        }
+    }
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -86,6 +105,19 @@ class MainActivity : AppCompatActivity() {
         val btnLogout = findViewById<ImageButton>(R.id.btnLogout)
         val btnMenu = findViewById<ImageButton>(R.id.btnMenu)
         val btnNewChat = findViewById<MaterialButton>(R.id.btnNewChat)
+        val btnVoice = findViewById<ImageButton>(R.id.btnVoice)
+        btnVoice.setOnClickListener{
+            try {
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "vi-VN")
+                    putExtra(RecognizerIntent.EXTRA_PROMPT, "Bạn muốn hỏi AI điều gì?")
+                }
+                speechLauncher.launch(intent)
+            } catch (e: Exception) {
+                Toast.makeText(this, "Thiết bị không hỗ trợ nhập liệu giọng nói", Toast.LENGTH_SHORT).show()
+            }
+        }
 
 
         adapter = ChatAdapter(viewModel.messages.value)

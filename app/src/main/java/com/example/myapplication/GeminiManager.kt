@@ -27,8 +27,7 @@ object GeminiManager {
     private val sharedSystemPrompt = content {
         text("Bạn là trợ lý lái xe. " +
                 "QUAN TRỌNG: Không sử dụng Markdown formatting (**bold**, *italic*, # heading, `code`, [link](url), v.v.). " +
-                "Sử dụng văn bản thuần túy, rõ ràng. " +
-                "Nếu người dùng muốn đi đâu đó, hãy bắt đầu câu trả lời bằng cụm từ 'NAVIGATE_TO: [tên địa điểm]'.")
+                "Sử dụng văn bản thuần túy, rõ ràng. ")
     }
 
 

@@ -1,7 +1,7 @@
 [versions]
 # Hạ AGP về bản mà Android Studio của bạn hỗ trợ
 agp = "8.8.2"
-kotlin = "2.1.0"
+kotlin = "2.3.0"
 
 # Hạ các thư viện AndroidX để không bị ép dùng SDK 36
 coreKtx = "1.15.0"

@@ -57,6 +57,9 @@ class MyAiScreen(carContext: CarContext, private val sessionId: String? = null) 
     private var pendingNavDestination: String? = null
     private var pendingNavUri: Uri? = null
 
+    // Quản lý AI (Local + Cloud)
+    private val aiManager = AIManager(carContext)
+
     // Lưu biến toàn cục để có thể destroy() bất cứ lúc nào, tránh xung đột Mic
     private var activeRecognizer: SpeechRecognizer? = null
     private var passiveRecognizer: SpeechRecognizer? = null
@@ -110,6 +113,10 @@ class MyAiScreen(carContext: CarContext, private val sessionId: String? = null) 
 
         lifecycle.addObserver(object : androidx.lifecycle.DefaultLifecycleObserver {
             override fun onStart(owner: androidx.lifecycle.LifecycleOwner) {
+                lifecycleScope.launch {
+                    aiManager.initialize() // Khởi tạo AI Engine
+                }
+                
                 val filter = IntentFilter("COM_EXAMPLE_NEW_MESSAGE")
 
                 // Với Android 14 cần flag RECEIVER_EXPORTED
@@ -144,6 +151,12 @@ class MyAiScreen(carContext: CarContext, private val sessionId: String? = null) 
                 } catch (e: Exception) {
                     Log.e("AI_DEBUG", "Lỗi khi hủy receiver: ${e.message}")
                 }
+            }
+
+            override fun onDestroy(owner: androidx.lifecycle.LifecycleOwner) {
+                aiManager.close()
+                tts?.stop()
+                tts?.shutdown()
             }
         })
 
@@ -449,7 +462,11 @@ class MyAiScreen(carContext: CarContext, private val sessionId: String? = null) 
 
                     if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
 
-                        GeminiManager.chatWithAIStream(input.trim()).collect{ chunk ->
+                        // 1. Đọc lựa chọn của người dùng từ bộ nhớ
+                        val isLocalSelected = PreferenceHelper.isLocalModeEnabled(carContext)
+
+                        // 2. Gọi getResponseStream từ aiManager
+                        aiManager.getResponseStream(input.trim(), isLocalSelected).collect { chunk ->
                             fullResponse += chunk
                             ttsBuffer.append(chunk)
 
