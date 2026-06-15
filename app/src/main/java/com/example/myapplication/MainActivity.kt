@@ -1,6 +1,5 @@
 package com.example.myapplication
 
-import android.annotation.SuppressLint
 import android.content.Intent
 import android.os.Bundle
 import android.speech.RecognizerIntent
@@ -8,7 +7,6 @@ import android.view.View
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.Toast
-import android.widget.Toolbar
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -23,6 +21,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.navigation.NavigationView
+import com.google.android.material.switchmaterial.SwitchMaterial
 import com.google.android.material.textfield.TextInputEditText
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
@@ -32,7 +31,7 @@ import androidx.core.widget.addTextChangedListener
 class MainActivity : AppCompatActivity() {
     private val viewModel: ChatViewModel by viewModels()
     private lateinit var adapter: ChatAdapter
-    private lateinit var historyAdapter: HistorySessionAdapter // Adapter riêng cho Sidebar lịch sử
+    private lateinit var historyAdapter: HistorySessionAdapter
     private lateinit var rvChat: RecyclerView
     private lateinit var mainLayout: View
     private lateinit var inputArea: View
@@ -41,6 +40,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var navigationView: NavigationView
     private lateinit var toolbar: MaterialToolbar
     private lateinit var edtSearchHistory: TextInputEditText
+
+    // KHAI BÁO TRẠM ĐIỀU PHỐI AI (TÍCH HỢP MỚI)
+    private lateinit var aiManager: AIManager
 
     private var currentSearchKeyword = ""
 
@@ -55,29 +57,28 @@ class MainActivity : AppCompatActivity() {
             if (!spokenText.isNullOrEmpty()) {
                 val edtMessage = findViewById<EditText>(R.id.edtMessage)
                 edtMessage.setText(spokenText)
-                // Đẩy con trỏ chuột xuống cuối đoạn văn bản vừa nhập
                 edtMessage.setSelection(spokenText.length)
             }
         }
     }
-
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContentView(R.layout.activity_main)
 
-        // Ánh xạ các View quản lý cấu trúc DrawerLayout mới
         drawerLayout = findViewById(R.id.drawerLayout)
         navigationView = findViewById(R.id.navigationView)
         inputArea = findViewById(R.id.inputArea)
         toolbar = findViewById(R.id.toolbar)
+        val dir = getExternalFilesDir(null)
+        if (dir != null && !dir.exists()) {
+            dir.mkdirs() // Ép hệ thống tạo thư mục
+        }
 
-        //đẩy thanh nhập liệu lên trên bàn phím
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.drawerLayout)) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             val imeInsets = insets.getInsets(WindowInsetsCompat.Type.ime())
-
 
             val toolbarParams = toolbar.layoutParams as android.view.ViewGroup.MarginLayoutParams
             toolbarParams.topMargin = systemBars.top
@@ -89,16 +90,35 @@ class MainActivity : AppCompatActivity() {
             inputArea.translationY = if (keyboardHeight > 0) -keyboardHeight.toFloat() else 0f
             insets
         }
-       // Khởi tạo View
-        setupView()
-        // Khởi tạo danh sách lịch sử ở Sidebar
-        setupHistorySidebar()
-        //Lắng nghe dữ liệu từ ViewModel (Reactive UI)
-        observeViewModel()
 
+        // 1. KHỞI TẠO LÕI AI NGOẠI TUYẾN NGẦM
+        aiManager = AIManager(this)
+        lifecycleScope.launch {
+            aiManager.initialize()
+        }
+
+        setupView()
+        setupHistorySidebar()
+        setupLocalAiSwitch() // Gọi hàm cài đặt công tắc chuyển đổi
+        observeViewModel()
     }
 
-    private fun setupView(){
+    // HÀM TÍCH HỢP MỚI: Lắng nghe công tắc bật/tắt Local AI
+    private fun setupLocalAiSwitch() {
+        val switchLocalMode = findViewById<SwitchMaterial>(R.id.switchLocalMode)
+
+        // Đọc trạng thái lưu trước đó
+        val isLocalSaved = PreferenceHelper.isLocalModeEnabled(this)
+        switchLocalMode.isChecked = isLocalSaved
+
+        switchLocalMode.setOnCheckedChangeListener { _, isChecked ->
+            PreferenceHelper.setLocalMode(this, isChecked)
+            val modeMsg = if (isChecked) "Đã bật chế độ Ngoại tuyến (Bảo mật 100%)" else "Đã chuyển sang Đám mây (Gemini)"
+            Toast.makeText(this, modeMsg, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun setupView() {
         rvChat = findViewById(R.id.rvChat)
         val edtMessage = findViewById<EditText>(R.id.edtMessage)
         val btnSend = findViewById<ImageButton>(R.id.btnSend)
@@ -106,7 +126,8 @@ class MainActivity : AppCompatActivity() {
         val btnMenu = findViewById<ImageButton>(R.id.btnMenu)
         val btnNewChat = findViewById<MaterialButton>(R.id.btnNewChat)
         val btnVoice = findViewById<ImageButton>(R.id.btnVoice)
-        btnVoice.setOnClickListener{
+
+        btnVoice.setOnClickListener {
             try {
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -119,102 +140,104 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-
         adapter = ChatAdapter(viewModel.messages.value)
         rvChat.layoutManager = LinearLayoutManager(this)
         rvChat.adapter = adapter
 
-        // Sự kiện bấm nút Hamburger -> Mở Sidebar trượt ra từ cạnh trái
         btnMenu.setOnClickListener {
             drawerLayout.openDrawer(navigationView)
         }
 
-        btnNewChat.setOnClickListener{
+        btnNewChat.setOnClickListener {
             viewModel.startNewChatSession()
             drawerLayout.closeDrawer(navigationView)
             Toast.makeText(this, "Đã bắt đầu phiên chat mới", Toast.LENGTH_SHORT).show()
         }
 
-        btnSend.setOnClickListener{
+        // TÍCH HỢP MỚI: NÚT GỬI ĐƯỢC CHIA LÀM 2 LUỒNG
+        btnSend.setOnClickListener {
             val text = edtMessage.text.toString().trim()
-            if(text.isNotEmpty()){
-                viewModel.sendMessage(text)
-                edtMessage.text.clear()// Xóa nội dung sau khi gửi
+            if (text.isNotEmpty()) {
+                val isLocalMode = PreferenceHelper.isLocalModeEnabled(this@MainActivity)
+
+                if (isLocalMode) {
+                    // --- LUỒNG 1: XỬ LÝ NGOẠI TUYẾN BẢO MẬT (LOCAL LLM) ---
+                    lifecycleScope.launch {
+                        // Hiển thị tin nhắn của User lên UI lập tức
+                        viewModel.addLocalMessageToUI(text, isUser = true)
+
+                        // Lấy phản hồi từ lõi AI trong máy
+                        val response = aiManager.getResponse(text, useLocalMode = true)
+
+                        // Hiển thị phản hồi của AI lên UI
+                        viewModel.addLocalMessageToUI(response, isUser = false)
+                    }
+                } else {
+                    // --- LUỒNG 2: XỬ LÝ ĐÁM MÂY (GEMINI + FIREBASE) ---
+                    viewModel.sendMessage(text)
+                }
+
+                edtMessage.text.clear()
             }
         }
 
-        btnLogout.setOnClickListener{
+        btnLogout.setOnClickListener {
             Firebase.auth.signOut()
             startActivity(Intent(this, LoginActivity::class.java))
             finishAffinity()
         }
-
     }
 
-    private fun setupHistorySidebar(){
+    private fun setupHistorySidebar() {
         rvHistorySessions = findViewById(R.id.rvHistorySessions)
         rvHistorySessions.layoutManager = LinearLayoutManager(this)
         edtSearchHistory = findViewById(R.id.edtSearchHistory)
 
-
-        // Khởi tạo Adapter nhận vào 2 hành động cụ thể khi click vào dòng lịch sử
         historyAdapter = HistorySessionAdapter(
             onSessionClick = { session ->
-                // Hành động A: Click chọn cuộc trò chuyện cũ -> Load lại lịch sử
                 viewModel.selectSession(session.id)
-                drawerLayout.closeDrawer(navigationView) // Đóng Sidebar
+                drawerLayout.closeDrawer(navigationView)
             },
             onSessionLongClick = { session ->
-                // Hành động B: Nhấn giữ chặt -> Hiện Dialog hỏi xác nhận xóa cuộc trò chuyện
                 showDeleteConfirmDialog(session)
             }
         )
         rvHistorySessions.adapter = historyAdapter
-        edtSearchHistory.addTextChangedListener{ editable ->
+
+        edtSearchHistory.addTextChangedListener { editable ->
             currentSearchKeyword = editable?.toString()?.trim()?.lowercase() ?: ""
-
             filterAndSubmitSessions(viewModel.sessions.value)
-
         }
-
     }
 
-    private fun observeViewModel(){
-        //Luồng 1: Lắng nghe danh sách tin nhắn chat để cập nhật giao diện chính
-        lifecycleScope.launch{
-            viewModel.messages.collect{updatedList ->
-                // Cập nhật dữ liệu cho Adapter
+    private fun observeViewModel() {
+        lifecycleScope.launch {
+            viewModel.messages.collect { updatedList ->
                 adapter.updateData(updatedList)
-
-                // Tự động cuộn xuống tin nhắn cuối cùng
-                if(updatedList.isNotEmpty()){
+                if (updatedList.isNotEmpty()) {
                     rvChat.smoothScrollToPosition(updatedList.size - 1)
                 }
-
             }
         }
-        // Luồng 2: Lắng nghe danh sách các Session từ Firestore đổ vào Sidebar
-        lifecycleScope.launch{
+
+        lifecycleScope.launch {
             viewModel.sessions.collect { sessionList ->
                 historyAdapter.submitList(sessionList)
             }
         }
     }
 
-    private fun filterAndSubmitSessions(fullList: List<SessionMetadata>){
-        if(currentSearchKeyword.isEmpty()){
+    private fun filterAndSubmitSessions(fullList: List<SessionMetadata>) {
+        if (currentSearchKeyword.isEmpty()) {
             historyAdapter.submitList(fullList)
-        }else{
-            val filtered = fullList.filter{ session ->
+        } else {
+            val filtered = fullList.filter { session ->
                 session.title.lowercase().contains(currentSearchKeyword)
             }
             historyAdapter.submitList(filtered)
         }
     }
 
-
-
-    // Hàm hiển thị hộp thoại xác nhận xóa hội thoại trên Đám mây
     private fun showDeleteConfirmDialog(session: SessionMetadata) {
         AlertDialog.Builder(this)
             .setTitle("Xóa cuộc trò chuyện?")
@@ -226,38 +249,10 @@ class MainActivity : AppCompatActivity() {
             .setNegativeButton("Hủy", null)
             .show()
     }
+
+    // QUAN TRỌNG: Giải phóng bộ nhớ RAM khi thoát ứng dụng
+    override fun onDestroy() {
+        super.onDestroy()
+        aiManager.close()
+    }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -41,7 +41,8 @@ class ModelDownloadManager(private val context: Context) {
 
     fun getActiveModelId(): String? {
         val prefs = context.getSharedPreferences("AiCarPrefs", Context.MODE_PRIVATE)
-        return prefs.getString("active_model_id", "qwen_3_litert")
+        // Đổi "qwen_3_litert" thành "gemma_chuan_litert"
+        return prefs.getString("active_model_id", "gemma_chuan_litert")
     }
 
     fun getActiveModel(): AiModel? {

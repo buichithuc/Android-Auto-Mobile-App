@@ -32,6 +32,7 @@ android {
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiKey\"")
         buildConfigField("String", "WEATHER_API_KEY", "\"$weatherKey\"")
         buildConfigField("String", "GOOGLE_API_KEY", "\"$googleKey\"")
+        buildConfigField("String", "SERPER_API_KEY", "\"${project.findProperty("SERPER_API_KEY")}\"")
     }
 
     buildFeatures {

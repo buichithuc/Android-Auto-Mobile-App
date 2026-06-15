@@ -2,7 +2,6 @@ package com.example.myapplication
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.room.util.copy
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.Query
@@ -101,6 +100,21 @@ class ChatViewModel : ViewModel() {
             }
     }
 
+    // =========================================================================
+    // HÀM MỚI: Xử lý tin nhắn ở chế độ Local AI (Bảo mật 100% On-Device)
+    // Tuyệt đối không lưu lên Firebase, chỉ hiển thị lên màn hình (UI)
+    // =========================================================================
+    fun addLocalMessageToUI(content: String, isUser: Boolean) {
+        val currentTime = System.currentTimeMillis()
+        val localMsg = ChatMessage(content, isUser, currentTime)
+
+        // Cập nhật StateFlow để UI tự động render tin nhắn mới
+        _messages.value = _messages.value + localMsg
+    }
+
+    // =========================================================================
+    // Xử lý tin nhắn ở chế độ Cloud (Gemini + Firebase)
+    // =========================================================================
     fun sendMessage(content: String) {
         val textTrimmed = content.trim()
         if (textTrimmed.isNotEmpty()) {

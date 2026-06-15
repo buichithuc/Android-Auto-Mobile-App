@@ -1,9 +1,7 @@
 package com.example.myapplication
 
-import android.content.Context
-
 interface ILocalAIEngine {
-    suspend fun initialize(modelPath: String)
+    suspend fun initialize(modelPath: String): String? // Trả về null nếu thành công, trả về chuỗi nếu có lỗi
     suspend fun generateResponse(prompt: String): String
     fun close()
 }

@@ -16,8 +16,15 @@ data class AiModel(
 
 object ModelRegistry {
     val supportedModels = listOf(
-        AiModel("qwen_3_litert", "Qwen 3 (LiteRT)", "Nhẹ, nhanh cho máy yếu", "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf", "qwen3-0.6b.litertlm", BackendType.LITERT),
-        AiModel("gemma_4_litert", "Gemma 4 (LiteRT)", "Thông minh, cần máy mạnh", "https://example.com/gemma", "gemma4.litertlm", BackendType.LITERT),
+        // Đây là mô hình chính chủ chuẩn định dạng LITERTLM mới nhất
+        AiModel(
+            id = "gemma_chuan_litert",
+            name = "Gemma 2B (Chuẩn LiteRT)",
+            description = "Mô hình định dạng chuẩn cho LiteRT 0.12.0",
+            downloadUrl = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm",
+            fileName = "gemma-4-E2B-it.litertlm", // Đổi tên file khớp 100% với file tải về
+            backendType = BackendType.LITERT
+        ),
         AiModel("qwen_2.5_onnx", "Qwen 2.5 (ONNX)", "Độ chính xác cao", "https://example.com/qwen2.5", "qwen2.5.onnx", BackendType.ONNX)
     )
 }

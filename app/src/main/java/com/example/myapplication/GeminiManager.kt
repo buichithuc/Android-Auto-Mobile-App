@@ -7,8 +7,15 @@ import com.google.ai.client.generativeai.type.generationConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.example.myapplication.BuildConfig
+import com.google.ai.client.generativeai.type.Schema
+import com.google.ai.client.generativeai.type.Tool
+import com.google.ai.client.generativeai.type.defineFunction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import com.google.ai.client.generativeai.type.FunctionType
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 
 object GeminiManager {
@@ -18,6 +25,29 @@ object GeminiManager {
     private const val TIER_2_MODEL = "gemini-2.5-flash-lite"
     private const val TIER_3_MODEL = "gemini-3.5-flash"
 
+    private fun getCurrentDateTime(): String {
+        val sdf = SimpleDateFormat("EEEE, dd/MM/yyyy HH:mm", Locale("vi", "VN"))
+        return sdf.format(Date())
+    }
+
+    // Khai báo hộp công cụ (Dùng listOf chứa Schema)
+    private val webSearchTool = Tool(
+        functionDeclarations = listOf(
+            defineFunction(
+                name = "search_web",
+                description = "Sử dụng công cụ này BẮT BUỘC khi cần thông tin realtime, tỷ số thể thao, tin tức, thời tiết.",
+                parameters = listOf(
+                    Schema(
+                        name = "query",
+                        // SỬA LẠI ĐOẠN MÔ TẢ NÀY ĐỂ ÉP AI TẠO TỪ KHÓA CHUẨN:
+                        description = "Từ khóa tìm kiếm Google ngắn gọn, tối ưu. TUYỆT ĐỐI KHÔNG đưa ngày/tháng/năm cụ thể vào từ khóa trừ khi bắt buộc. Chỉ dùng danh từ chính. VD: thay vì 'tỷ số world cup ngày 14/6/2026', hãy dùng 'kết quả World Cup 2026 mới nhất'.",
+                        type = FunctionType.STRING
+                    )
+                )
+            )
+        )
+    )
+
 
     private val sharedConfig = generationConfig {
         temperature = 0.7f
@@ -26,12 +56,13 @@ object GeminiManager {
 
     private val sharedSystemPrompt = content {
         text("Bạn là trợ lý lái xe. " +
+                "THÔNG TIN QUAN TRỌNG: Hôm nay là ${getCurrentDateTime()}." +
                 "QUAN TRỌNG: Không sử dụng Markdown formatting (**bold**, *italic*, # heading, `code`, [link](url), v.v.). " +
                 "Sử dụng văn bản thuần túy, rõ ràng. ")
     }
 
 
-    private val tier1Model = GenerativeModel(modelName = TIER_1_MODEL, apiKey = API_KEY, generationConfig = sharedConfig, systemInstruction = sharedSystemPrompt)
+    private val tier1Model = GenerativeModel(modelName = TIER_1_MODEL, apiKey = API_KEY, generationConfig = sharedConfig, systemInstruction = sharedSystemPrompt, tools = listOf(webSearchTool))
     private val tier2Model = GenerativeModel(modelName = TIER_2_MODEL, apiKey = API_KEY, generationConfig = sharedConfig, systemInstruction = sharedSystemPrompt)
     private val tier3Model = GenerativeModel(modelName = TIER_3_MODEL, apiKey = API_KEY, generationConfig = sharedConfig, systemInstruction = sharedSystemPrompt)
 
@@ -45,8 +76,46 @@ object GeminiManager {
 
             try {
                 val responseStream = chatSession.sendMessageStream(userInput)
+                var hasFunctionCall = false
+                var functionName = ""
+                var searchQuery = ""
+
                 responseStream.collect{ chunk ->
-                    chunk.text?.let{ emit(it) }
+
+
+                    val call = chunk.functionCall
+
+                    // Nếu call khác null nghĩa là có yêu cầu gọi hàm
+                    if (call != null) {
+                        hasFunctionCall = true
+                        functionName = call.name
+                        // Rút trích từ khóa tìm kiếm mà AI đã tự suy luận ra
+                        searchQuery = call.args["query"] as? String ?: ""
+                    }
+
+                    // In văn bản bình thường ra màn hình (nếu có)
+                    chunk.text?.let { emit(it) }
+                }
+                if(hasFunctionCall && functionName == "search_web"){
+                    emit("\n[Đang dùng Internet tìm kiếm: '$searchQuery'...]\n")
+
+                    val rawSearchResults = SearchManager.searchGoogle(searchQuery)
+
+                    Log.d("GEMINI_DEBUG", "Dữ liệu cào từ Google: $rawSearchResults")
+                    // BƠM DỮ LIỆU TÌM KIẾM NGƯỢC LẠI CHO AI (RAG)
+                    val finalResponseStream = chatSession.sendMessageStream(
+                        content(role = "function") {
+                            part(com.google.ai.client.generativeai.type.FunctionResponsePart(
+                                "search_web",
+                                org.json.JSONObject(mapOf("results" to rawSearchResults))
+                            ))
+                        }
+                    )
+
+                    // AI đọc kết quả Search và trả lời người dùng
+                    finalResponseStream.collect { chunk ->
+                        chunk.text?.let { emit(it) }
+                    }
                 }
             } catch (e: Exception) {
                 Log.e("GEMINI_DEBUG", "Lỗi chi tiết: ${e.message}")
