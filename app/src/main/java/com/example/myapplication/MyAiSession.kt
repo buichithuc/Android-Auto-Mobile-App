@@ -24,12 +24,14 @@ import kotlinx.coroutines.launch
 import java.util.Locale
 import android.net.Uri
 import androidx.core.content.ContextCompat
+import com.google.android.gms.common.util.CollectionUtils.listOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.firestore
 import com.google.firebase.firestore.Query
+
 
 
 enum class AssistantState {
@@ -90,22 +92,9 @@ class MyAiScreen(carContext: CarContext, private val sessionId: String? = null) 
 
 
     init {
-        // Check if there's a pending navigation request from Android Auto
-        val pendingNavUri = MyAiCarService.pendingNavigationUri
-        if (pendingNavUri != null) {
-            Log.d("NAV_SCREEN", "Processing pending navigation URI: $pendingNavUri")
-            val query = pendingNavUri.getQueryParameter("q")
-            if (query != null) {
-                Log.d("NAV_SCREEN", "Navigation destination: $query")
-                // Store for later when TTS is ready
-                pendingNavDestination = query
-                this.pendingNavUri = pendingNavUri
-            }
-            MyAiCarService.pendingNavigationUri = null
-        }
 
         locationManager = carContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        
+
         // Khởi tạo TTS an toàn
         tts = TextToSpeech(carContext, this)
         setupTtsListener()
@@ -116,7 +105,7 @@ class MyAiScreen(carContext: CarContext, private val sessionId: String? = null) 
                 lifecycleScope.launch {
                     aiManager.initialize() // Khởi tạo AI Engine
                 }
-                
+
                 val filter = IntentFilter("COM_EXAMPLE_NEW_MESSAGE")
 
                 // Với Android 14 cần flag RECEIVER_EXPORTED
@@ -135,13 +124,7 @@ class MyAiScreen(carContext: CarContext, private val sessionId: String? = null) 
                 if (sessionId != null) {
                     loadConversationContext(sessionId)
                 }
-                
-                // Process pending navigation after screen starts (TTS should be ready by then)
-                if (pendingNavDestination != null && tts != null && pendingNavUri != null) {
-                    Log.d("NAV_SCREEN", "Starting pending navigation to: $pendingNavDestination")
-                    startNavigation(pendingNavUri!!, pendingNavDestination!!)
-                    pendingNavDestination = null
-                }
+
             }
 
             override fun onStop(owner: androidx.lifecycle.LifecycleOwner) {
@@ -167,10 +150,12 @@ class MyAiScreen(carContext: CarContext, private val sessionId: String? = null) 
         tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {}
             override fun onDone(utteranceId: String?) {
-                // Khi AI nói xong, đưa nút bấm về lại hình Mic (IDLE)
                 carContext.mainExecutor.execute {
-                    updateState(AssistantState.IDLE, displayMessage)
-                    startPassiveListening()
+                    isSpeaking = false
+                    processQueue() // Đọc câu tiếp theo trong hàng đợi
+                    if (ttsQueue.isEmpty()) {
+                        updateState(AssistantState.IDLE, displayMessage)
+                    }
                 }
             }
             override fun onError(utteranceId: String?) {
@@ -233,7 +218,11 @@ class MyAiScreen(carContext: CarContext, private val sessionId: String? = null) 
 
 
     override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) tts?.language = Locale("vi", "VN")
+        if (status == TextToSpeech.SUCCESS) {
+            tts?.language = Locale("vi", "VN")
+            tts?.setSpeechRate(0.95f) // Chậm lại một chút (1.0 là bình thường)
+            tts?.setPitch(0.9f)       // Giọng trầm xuống một chút nghe sẽ bớt "sắc" hơn
+        }
     }
 
     override fun onGetTemplate(): Template {
@@ -380,26 +369,48 @@ class MyAiScreen(carContext: CarContext, private val sessionId: String? = null) 
         activeRecognizer?.startListening(intent)
     }
 
+    private val ttsQueue = java.util.LinkedList<String>()
+    private var isSpeaking = false
+
+    private fun cleanTextForTTS(text: String): String {
+        return text
+            // Loại bỏ các thẻ in đậm/in nghiêng nếu Gemini vẫn vô tình lọt vào
+            .replace(Regex("\\*\\*.*?\\*\\*"), "")
+            .replace(Regex("[*#`\\[\\]]"), "")
+            // Đổi dấu xuống dòng thành dấu cách để TTS không bị ngắt quãng giữa các gạch đầu dòng
+            .replace("\n", " ")
+            .replace("...", " ")
+            .replace("—", " ")
+            .replace(":", " ")
+            .replace(",", " ")
+            // Rút gọn nhiều khoảng trắng liên tiếp thành 1 khoảng trắng
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+
+    fun speakSentence(text: String) {
+        if (text.isEmpty()) return
+
+        synchronized(ttsQueue) {
+            ttsQueue.add(text) // Không cần gọi cleanTextForTTS ở đây nữa vì đã clean ở bước 2
+        }
+        processQueue()
+    }
+
+    private fun processQueue() {
+        if (isSpeaking || ttsQueue.isEmpty()) return
+
+        val nextSentence = synchronized(ttsQueue) { ttsQueue.poll() }
+        isSpeaking = true
+
+        // Dùng mã định danh duy nhất để biết khi nào câu này đọc xong
+        val utteranceId = "TTS_${System.currentTimeMillis()}"
+        tts?.speak(nextSentence, TextToSpeech.QUEUE_ADD, null, utteranceId)
+    }
 
 
     private fun processWithAI(input: String) {
         val lowerInput = input.lowercase()
-
-        if(lowerInput.contains("xóa lịch sử") || lowerInput.contains("làm mới cuộc trò chuyện")){
-            GeminiManager.clearChatHistory()
-            updateState(AssistantState.IDLE, "Lịch sử trò chuyện đã được làm mới.")
-            tts?.speak("Đã xóa lịch sử trò chuyện", TextToSpeech.QUEUE_FLUSH, null, "ClearHistoryTTS")
-            startPassiveListening()
-            return
-        }
-
-        if (lowerInput.contains("thời tiết") ){
-            lifecycleScope.launch {
-                handleWeatherRequest()
-            }
-            return  // Dừng để không gọi Gemini API
-        }
-
 
         lifecycleScope.launch {
             try {
@@ -471,37 +482,36 @@ class MyAiScreen(carContext: CarContext, private val sessionId: String? = null) 
                             ttsBuffer.append(chunk)
 
                             updateState(AssistantState.SPEAKING, fullResponse)
+                            val currentText = ttsBuffer.toString()
+                            val match = Regex("([.!?])(?:\\s|\$)").findAll(currentText).lastOrNull()
 
-                            val currentBuffer = ttsBuffer.toString()
+                            if (match != null) {
+                                // Lấy vị trí cắt câu
+                                val splitIndex = match.range.last
 
-                            val lastPunctuationIndex = currentBuffer.indexOfLast { it == '.' || it == '?' || it == '!' || it == '\n' }
+                                // Cắt từ đầu đến hết dấu câu
+                                val sentenceToSpeak = currentText.substring(0, splitIndex + 1)
 
-                            if(lastPunctuationIndex != -1){
-                                val sentenceToSpeak = currentBuffer.substring(0, lastPunctuationIndex + 1).trim()
+                                // Dọn dẹp câu trước khi đọc
+                                val cleanSentence = cleanTextForTTS(sentenceToSpeak)
 
-                                val cleanSentence = sentenceToSpeak.replace("NAVIGATE_TO:", "").trim()
-
-                                if (sentenceToSpeak.contains("NAVIGATE_TO:") && !isNavigating) {
-                                    isNavigating = true
-                                    val dest = sentenceToSpeak.substringAfter("NAVIGATE_TO:").substringBefore(".").trim()
-                                    if (dest.isNotEmpty()) {
-                                        // Mở bản đồ ngay lập tức, không cần đợi đọc xong
-                                        startNavigation(Uri.parse("geo:0,0?q=${Uri.encode(dest)}"), dest)
-                                    }
+                                // Bỏ qua các câu quá ngắn (ví dụ: "1.", "À.") để tránh vấp nhịp
+                                if (cleanSentence.isNotBlank() && cleanSentence.length > 3) {
+                                    speakSentence(cleanSentence)
                                 }
 
-                                if (cleanSentence.isNotEmpty()) {
-                                    tts?.speak(cleanSentence, TextToSpeech.QUEUE_ADD, null, java.util.UUID.randomUUID().toString())
-                                }
-
-                                ttsBuffer.delete(0, lastPunctuationIndex + 1)
+                                // Xóa đoạn đã đọc khỏi bộ đệm, giữ lại phần chưa thành câu
+                                ttsBuffer.delete(0, splitIndex + 1)
                             }
+                            // XỬ LÝ PHẦN CẶN (Khi Stream kết thúc mà chưa có dấu chấm câu)
+                            val leftover = cleanTextForTTS(ttsBuffer.toString())
+                            if (leftover.isNotBlank()) {
+                                speakSentence(leftover)
+                                ttsBuffer.setLength(0) // Xóa sạch bộ đệm
+                            }
+
                         }
 
-                        val leftover = ttsBuffer.toString().trim().replace("NAVIGATE_TO:", "")
-                        if(leftover.isNotEmpty()){
-                            tts?.speak(leftover, TextToSpeech.QUEUE_ADD, null, "FinalChunk")
-                        }
 
                         val aiTime = System.currentTimeMillis()
                         val aiMsg = ChatMessage(fullResponse, false, aiTime)
@@ -524,175 +534,6 @@ class MyAiScreen(carContext: CarContext, private val sessionId: String? = null) 
                 updateState(AssistantState.IDLE, "Lỗi kết nối. Hãy thử lại sau.")
                 startPassiveListening()
             }
-        }
-    }
-    private fun speakAndNavigate(text: String, destination: String) {
-        // Phát âm thanh phản hồi
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "NavTTS")
-
-        try {
-            // Làm sạch và mã hóa địa điểm
-            val encodedDestination = android.net.Uri.encode(destination.trim())
-            val uri = android.net.Uri.parse("geo:0,0?q=$encodedDestination")
-            
-            Log.d("NAV_DEBUG", "Navigation request for: $destination")
-            Log.d("NAV_DEBUG", "Encoded URI: $uri")
-            
-            // Start navigation - shows UI on Android Auto and provides voice feedback
-            startNavigation(uri, destination)
-            
-            // Thông báo thêm bằng giọng nói
-            tts?.speak("Đang mở bản đồ để điều hướng đến $destination", TextToSpeech.QUEUE_ADD, null, "NavInfoTTS")
-
-        } catch (e: Exception) {
-            Log.e("NAV_ERROR", "Lỗi xử lý điều hướng đến $destination: ${e.message}")
-            tts?.speak("Rất tiếc, tôi không thể xử lý yêu cầu điều hướng lúc này.", TextToSpeech.QUEUE_ADD, null, "NavErrorTTS")
-        }
-    }
-
-
-      //Show navigation screen in Android Auto
-    private fun startNavigation(navigationUri: Uri, destination: String) {
-        try {
-            Log.d("NAV_SCREEN", "Starting navigation: $destination")
-            
-            // Show navigation screen in Android Auto with destination info
-            val navigationScreen = NavigationScreen(carContext, destination)
-            screenManager.push(navigationScreen)
-            
-            Log.d("NAV_SCREEN", "Navigation screen pushed successfully")
-        } catch (e: Exception) {
-            Log.e("NAV_SCREEN", "Error starting navigation: ${e.message}", e)
-        }
-    }
-
-    // Hàm để lấy vị trí:
-    private fun getCurrentLocation(): Pair<Double, Double>? {
-        try {
-            val location = locationManager?.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-            return if (location != null) {
-                Pair(location.latitude, location.longitude)
-            } else {
-                null
-            }
-        } catch (e: SecurityException) {
-            Log.e("LOCATION_ERROR", "Permission denied: ${e.message}")
-            return null
-        }
-    }
-
-    private suspend fun handleWeatherRequest(){
-        try{
-            updateState(AssistantState.THINKING, "Đang kiểm tra thời tiết...")
-            // 1. Lấy vị trí GPS
-            val location = getCurrentLocation()
-            if (location == null) {
-                updateState(AssistantState.IDLE, "Không thể xác định vị trí. Vui lòng bật GPS.")
-                startPassiveListening()
-                return
-            }
-
-            //Lay ten dia diem
-            val locationInfo = WeatherManager.getLocationName(
-                latitude = location.first,
-                longitude = location.second
-            )
-
-            // 2. Gọi API thời tiết
-            val weatherData = WeatherManager.getWeather(
-                latitude = location.first,
-                longitude = location.second
-            )
-
-            if (weatherData == null) {
-                updateState(AssistantState.IDLE, "Không thể lấy dữ liệu thời tiết.")
-                startPassiveListening()
-                return
-            }
-
-            // Tạo response cho display và TTS
-            val displayResponse = buildWeatherResponseForDisplay(weatherData, locationInfo)
-            val ttsResponse = buildWeatherResponseForTTS(weatherData, locationInfo)
-
-            // 4. Phát âm thanh
-            updateState(AssistantState.SPEAKING, displayResponse)
-            requestAudioFocusAndSpeak(ttsResponse)
-
-
-        }catch(e: Exception){
-            Log.e("WEATHER_ERROR", "Error: ${e.message}")
-            updateState(AssistantState.IDLE, "Lỗi kiểm tra thời tiết.")
-            startPassiveListening()
-        }
-    }
-
-
-    private fun buildWeatherResponseForTTS(
-        weather: WeatherManager.WeatherData,
-        locationInfo: WeatherManager.LocationInfo? = null
-    ): String {
-        val locationLine = if (locationInfo != null) {
-            val locationText = if (locationInfo.district != null) {
-                "${locationInfo.district}"
-            } else {
-                locationInfo.city
-            }
-
-            "Bạn đang ở $locationText. Hôm nay ở đây thời tiết như sau. "
-        } else {
-            "Hôm nay ở vị trí bạn như sau. "
-        }
-
-        // Tạo chuỗi thân thiện để phát TTS
-        return buildString {
-            append(locationLine)
-
-            // Nhiệt độ
-            append("Nhiệt độ ${weather.temp} độ C. ")
-
-            // Cảm giác
-            append("Cảm giác như ${weather.feelsLike} độ C. ")
-
-            // Tình trạng
-            append("Tình trạng: ${weather.description}. ")
-
-            // Độ ẩm
-            append("Độ ẩm ${weather.humidity} phần trăm. ")
-
-            // Gió
-            val windLevel = when {
-                weather.windSpeed < 2 -> "rất nhẹ"
-                weather.windSpeed < 5 -> "nhẹ"
-                weather.windSpeed < 10 -> "vừa phải"
-                else -> "mạnh"
-            }
-            append("Gió $windLevel, khoảng ${String.format("%.1f", weather.windSpeed)} mét trên giây.")
-        }
-    }
-
-    private fun buildWeatherResponseForDisplay(
-        weather: WeatherManager.WeatherData,
-        locationInfo: WeatherManager.LocationInfo? = null
-    ): String {
-        val locationLine = if (locationInfo != null) {
-            val locationText = if (locationInfo.district != null) {
-                "${locationInfo.district}"
-            } else {
-                locationInfo.city
-            }
-
-            "Bạn đang ở $locationText.\nHôm nay ở đây:\n"
-        } else {
-            "Hôm nay:\n"
-        }
-
-        // Tạo chuỗi hiển thị (display trên car screen nếu có)
-        return buildString {
-            append(locationLine)
-            append("• Nhiệt độ: ${weather.temp}°C (cảm giác ${weather.feelsLike}°C)\n")
-            append("• Tình trạng: ${weather.description}\n")
-            append("• Độ ẩm: ${weather.humidity}%\n")
-            append("• Gió: ${weather.windSpeed}m/s")
         }
     }
 
@@ -759,33 +600,3 @@ class MyAiScreen(carContext: CarContext, private val sessionId: String? = null) 
 
 
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

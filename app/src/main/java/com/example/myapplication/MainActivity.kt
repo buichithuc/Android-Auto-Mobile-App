@@ -27,6 +27,7 @@ import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import kotlinx.coroutines.launch
 import androidx.core.widget.addTextChangedListener
+import android.net.Uri
 
 class MainActivity : AppCompatActivity() {
     private val viewModel: ChatViewModel by viewModels()
@@ -67,6 +68,22 @@ class MainActivity : AppCompatActivity() {
         enableEdgeToEdge()
         setContentView(R.layout.activity_main)
 
+
+        // --- ĐOẠN CODE XIN QUYỀN ĐỌC FILE MÔ HÌNH ---
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            if (!android.os.Environment.isExternalStorageManager()) {
+                val intent = Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                intent.data = Uri.parse("package:${packageName}")
+                startActivity(intent)
+                Toast.makeText(this, "Vui lòng BẬT công tắc để AI có quyền đọc mô hình!", Toast.LENGTH_LONG).show()
+            }
+        } else {
+            if (checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE), 1)
+            }
+        }
+        // --------------------------------------------
+
         drawerLayout = findViewById(R.id.drawerLayout)
         navigationView = findViewById(R.id.navigationView)
         inputArea = findViewById(R.id.inputArea)
@@ -75,6 +92,12 @@ class MainActivity : AppCompatActivity() {
         if (dir != null && !dir.exists()) {
             dir.mkdirs() // Ép hệ thống tạo thư mục
         }
+
+        val prefs = getSharedPreferences("AiCarPrefs", android.content.Context.MODE_PRIVATE)
+        val isDark = prefs.getBoolean("is_dark_mode", false)
+        androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(
+            if (isDark) androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_YES else androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_NO
+        )
 
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.drawerLayout)) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -127,6 +150,8 @@ class MainActivity : AppCompatActivity() {
         val btnNewChat = findViewById<MaterialButton>(R.id.btnNewChat)
         val btnVoice = findViewById<ImageButton>(R.id.btnVoice)
 
+        val btnSettings = findViewById<ImageButton>(R.id.btnSettings)
+
         btnVoice.setOnClickListener {
             try {
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -152,6 +177,11 @@ class MainActivity : AppCompatActivity() {
             viewModel.startNewChatSession()
             drawerLayout.closeDrawer(navigationView)
             Toast.makeText(this, "Đã bắt đầu phiên chat mới", Toast.LENGTH_SHORT).show()
+        }
+
+        btnSettings.setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+            drawerLayout.closeDrawer(navigationView)
         }
 
         // TÍCH HỢP MỚI: NÚT GỬI ĐƯỢC CHIA LÀM 2 LUỒNG
@@ -250,6 +280,14 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+
+    override fun onResume() {
+        super.onResume()
+        // Mỗi khi quay lại màn hình chính, app tự kiểm tra lại mô hình
+        lifecycleScope.launch {
+            aiManager.initialize()
+        }
+    }
     // QUAN TRỌNG: Giải phóng bộ nhớ RAM khi thoát ứng dụng
     override fun onDestroy() {
         super.onDestroy()

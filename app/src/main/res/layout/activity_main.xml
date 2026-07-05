@@ -154,16 +154,33 @@
                     android:paddingBottom="12dp"/>
             </com.google.android.material.textfield.TextInputLayout>
 
-            <TextView
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Gần đây"
-                android:textSize="14sp"
-                android:textStyle="bold"
-                android:textColor="#757575"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
                 android:layout_marginTop="20dp"
                 android:layout_marginBottom="8dp"
-                android:layout_marginStart="8dp"/>
+                android:layout_marginStart="8dp"
+                android:layout_marginEnd="8dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Gần đây"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:textColor="#757575" />
+
+                <ImageButton
+                    android:id="@+id/btnSettings"
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@android:drawable/ic_menu_preferences"
+                    app:tint="#757575" />
+            </LinearLayout>
 
             <androidx.recyclerview.widget.RecyclerView
                 android:id="@+id/rvHistorySessions"
@@ -203,16 +220,10 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="AI Ngoại tuyến"
+                        android:text="Local AI"
                         android:textSize="15sp"
                         android:textStyle="bold"
                         android:textColor="#333333"/>
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Bảo mật riêng tư 100%"
-                        android:textSize="12sp"
-                        android:textColor="#757575"/>
                 </LinearLayout>
 
                 <com.google.android.material.switchmaterial.SwitchMaterial

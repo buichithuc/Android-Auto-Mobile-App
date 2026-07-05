@@ -1,6 +1,7 @@
 package com.example.myapplication
 
 import android.content.Context
+import android.os.Environment
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -21,70 +22,91 @@ class AIManager(private val context: Context) {
         if (activeModel != null) {
             localEngine = factory.createEngine(activeModel)
 
-            // File nằm ở thẻ nhớ ngoài (Nơi vừa dùng ADB push vào)
-            val externalFile = java.io.File(context.getExternalFilesDir(null), activeModel.fileName)
-            // File nằm ở bộ nhớ trong (Nơi AI có quyền mmap file > 2GB)
+            // Đoạn code ĐÚNG:
+            val publicDownloads = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+            val aiModelsDir = java.io.File(publicDownloads, "AiModels")
+            val externalFile = java.io.File(aiModelsDir, activeModel.fileName)
+
+            // Cập nhật lại đường dẫn finalPath để trỏ vào thư mục AiModels
+            var finalPath = externalFile.absolutePath
+
+            // Phần logic kiểm tra và copy sang internalFile vẫn giữ nguyên...
+            // Đảm bảo internalFile cũng trỏ đúng tên file
             val internalFile = java.io.File(context.filesDir, activeModel.fileName)
 
-            // BẢN VÁ LỖI MMAP 2GB: Copy file vào bộ nhớ trong nếu chưa có
-            if (externalFile.exists() && (!internalFile.exists() || internalFile.length() != externalFile.length())) {
-                systemInitError = "Đang tối ưu hóa mô hình 3.2GB vào bộ nhớ lõi. Vui lòng đợi 1 - 2 phút và thử chat lại..."
-                Log.i("LocalAI", "Bắt đầu copy file vào bộ nhớ trong (Internal Storage)...")
-
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    try {
-                        externalFile.inputStream().use { input ->
-                            internalFile.outputStream().use { output ->
-                                input.copyTo(output)
+            if (activeModel.backendType == BackendType.LITERT) {
+                //  Kiểm tra cả sự tồn tại VÀ dung lượng file. Nếu lệch dung lượng -> Copy đè!
+                if (externalFile.exists()) {
+                    if (!internalFile.exists() || internalFile.length() != externalFile.length()) {
+                        systemInitError = "Đang nạp file 2GB vào bộ nhớ lõi (Vui lòng đợi)..."
+                        Log.i("LocalAI", "Bắt đầu copy đè file chuẩn vào bộ nhớ trong...")
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            try {
+                                externalFile.inputStream().use { input ->
+                                    internalFile.outputStream().use { output -> input.copyTo(output) }
+                                }
+                            } catch (e: Exception) {
+                                systemInitError = "Lỗi copy file: ${e.message}"
                             }
                         }
-                        Log.i("LocalAI", "Copy hoàn tất! Sẵn sàng nạp mô hình.")
-                    } catch (e: Exception) {
-                        systemInitError = "Lỗi khi copy file vào bộ nhớ lõi: ${e.message}"
-                        return@withContext
                     }
                 }
-            }
-
-            // Nạp file từ bộ nhớ trong
-            val finalPath = if (internalFile.exists()) internalFile.absolutePath else externalFile.absolutePath
-            systemInitError = localEngine?.initialize(finalPath)
-        } else {
-            systemInitError = "Lỗi: Không lấy được Active Model từ ModelDownloadManager!"
-            Log.e("AIManager", systemInitError!!)
-        }
-    }
-
-    suspend fun getResponse(prompt: String, useLocalMode: Boolean): String {
-        return if (useLocalMode) {
-            if (systemInitError != null) {
-                return "[Local] $systemInitError"
-            }
-            val response = localEngine?.generateResponse(prompt) ?: "Lỗi chưa rõ nguyên nhân."
-            "[Local] $response"
-        } else {
-            var response = ""
-            GeminiManager.chatWithAIStream(prompt).collect { chunk -> response += chunk }
-            "[Cloud] $response"
-        }
-    }
-
-    suspend fun getResponseStream(prompt: String, useLocalMode: Boolean): Flow<String> {
-        return if (useLocalMode) {
-            flow {
-                if (systemInitError != null) {
-                    emit("[Local] $systemInitError")
-                } else {
-                    val response = localEngine?.generateResponse(prompt) ?: "Lỗi chưa rõ nguyên nhân."
-                    emit("[Local] $response")
+                finalPath = internalFile.absolutePath
+            } else {
+                // ĐỐI VỚI ONNX: ONNX Runtime GenAI đọc trực tiếp từ thư mục ngoài rất tốt, không cần copy
+                Log.i("LocalAI", "Chế độ ONNX: Sử dụng trực tiếp thư mục từ External Storage")
+                if (!externalFile.exists() || !externalFile.isDirectory) {
+                    systemInitError =
+                        "Không tìm thấy thư mục cấu hình ONNX tại: ${externalFile.absolutePath}"
+                    return
                 }
             }
-        } else {
-            GeminiManager.chatWithAIStream(prompt)
+
+            if (File(finalPath).exists()) {
+                systemInitError = localEngine?.initialize(finalPath)
+            } else {
+                systemInitError = "Không tìm thấy file mô hình tại $finalPath"
+            }
         }
     }
 
-    fun close() {
-        localEngine?.close()
+        suspend fun getResponse(prompt: String, useLocalMode: Boolean): String {
+            return if (useLocalMode) {
+                if (systemInitError != null) {
+                    return "[Local] $systemInitError"
+                }
+                val response = localEngine?.generateResponse(prompt) ?: "Lỗi chưa rõ nguyên nhân."
+                "[Local] $response"
+            } else {
+                var response = ""
+                GeminiManager.chatWithAIStream(prompt).collect { chunk -> response += chunk }
+                "[Cloud] $response"
+            }
+        }
+
+        suspend fun getResponseStream(prompt: String, useLocalMode: Boolean): Flow<String> {
+            return if (useLocalMode) {
+                flow {
+                    if (systemInitError != null) {
+                        emit("[Local] $systemInitError")
+                    } else {
+                        val response =
+                            localEngine?.generateResponse(prompt) ?: "Lỗi chưa rõ nguyên nhân."
+                        emit("[Local] $response")
+                    }
+                }
+            } else {
+                GeminiManager.chatWithAIStream(prompt)
+            }
+        }
+
+
+        suspend fun reloadAI() {
+        close() // Giải phóng engine cũ
+        initialize() // Nạp lại engine với mô hình mới
     }
+
+        fun close() {
+            localEngine?.close()
+        }
 }

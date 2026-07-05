@@ -11,20 +11,28 @@ data class AiModel(
     val downloadUrl: String,
     val fileName: String,
     val backendType: BackendType,
-    var isDownloaded: Boolean = false
+    val isZip: Boolean = false // Cờ đánh dấu file nén
 )
 
 object ModelRegistry {
     val supportedModels = listOf(
-        // Đây là mô hình chính chủ chuẩn định dạng LITERTLM mới nhất
         AiModel(
             id = "gemma_chuan_litert",
-            name = "Gemma 2B (Chuẩn LiteRT)",
-            description = "Mô hình định dạng chuẩn cho LiteRT 0.12.0",
-            downloadUrl = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm",
-            fileName = "gemma-4-E2B-it.litertlm", // Đổi tên file khớp 100% với file tải về
-            backendType = BackendType.LITERT
+            name = "Gemma 2B (LiteRT)",
+            description = "Mô hình định dạng chuẩn cho LiteRT, nhẹ, phù hợp RAM 4GB.",
+            downloadUrl = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm?download=true",
+            fileName = "gemma-4-E2B-it.litertlm",
+            backendType = BackendType.LITERT,
+            isZip = false
         ),
-        AiModel("qwen_2.5_onnx", "Qwen 2.5 (ONNX)", "Độ chính xác cao", "https://example.com/qwen2.5", "qwen2.5.onnx", BackendType.ONNX)
+        AiModel(
+            id = "qwen_2.5_0.5b_onnx",
+            name = "Qwen 2.5 0.5B (ONNX)",
+            description = "Phiên bản siêu nhẹ, phản hồi cực nhanh. Yêu cầu RAM 2GB.",
+            downloadUrl = "https://huggingface.co/thucbc/Qwen-2.5-0.5B-ONNX-Android/resolve/main/qwen_0.5b_onnx_folder.zip?download=true",
+            fileName = "qwen_0.5b_onnx_folder",
+            backendType = BackendType.ONNX,
+            isZip = true
+        ),
     )
 }

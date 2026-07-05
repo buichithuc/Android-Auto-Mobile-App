@@ -25,7 +25,7 @@ class LiteRTEngine(private val context: Context) : ILocalAIEngine {
                 EngineConfig(
                     modelPath = modelFile.absolutePath,
                     backend = Backend.CPU(),
-                    cacheDir = context.cacheDir.absolutePath
+                    cacheDir = context.filesDir.absolutePath
                 )
             ).apply { initialize() }
             Log.i("LocalAI", "Lõi AI Offline (LiteRT) đã sẵn sàng!")

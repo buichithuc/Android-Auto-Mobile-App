@@ -3,50 +3,89 @@ package com.example.myapplication
 import android.app.DownloadManager
 import android.content.Context
 import android.net.Uri
+import android.os.Environment
 import java.io.File
+import java.io.FileOutputStream
+import java.util.zip.ZipFile
 
 class ModelDownloadManager(private val context: Context) {
-    
-    // TÍNH NĂNG 1: TẢI MÔ HÌNH
+
+    private val prefs = context.getSharedPreferences("AiCarPrefs", Context.MODE_PRIVATE)
+
+    // ĐỒNG BỘ: Gom tất cả về thư mục Download ẩn của ứng dụng
+    fun getModelDirectory(): File {
+        val publicDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val dir = File(publicDownloads, "AiModels")
+        if (!dir.exists()) dir.mkdirs()
+        return dir
+    }
+
     fun downloadModel(model: AiModel): Long {
+        val destinationName = if (model.isZip) "${model.fileName}.zip" else model.fileName
+
         val request = DownloadManager.Request(Uri.parse(model.downloadUrl))
             .setTitle("Đang tải ${model.name}")
             .setDescription("Vui lòng không tắt mạng...")
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            .setDestinationInExternalFilesDir(context, null, model.fileName)
-            
+            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "AiModels/$destinationName")
+
         val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        return manager.enqueue(request) // Trả về ID tiến trình tải
+        val downloadId = manager.enqueue(request)
+
+        prefs.edit().putString("download_id_$downloadId", model.id).apply()
+        return downloadId
     }
 
-    // TÍNH NĂNG 2: XÓA MÔ HÌNH
     fun deleteModel(model: AiModel): Boolean {
-        val file = File(context.getExternalFilesDir(null), model.fileName)
-        return if (file.exists()) {
-            file.delete()
+        val fileOrDir = File(getModelDirectory(), model.fileName)
+        return if (fileOrDir.exists()) {
+            if (fileOrDir.isDirectory) fileOrDir.deleteRecursively() else fileOrDir.delete()
+
+            if (getActiveModelId() == model.id) {
+                setActiveModelId("gemma_chuan_litert")
+            }
+            true
         } else false
     }
 
-    // TÍNH NĂNG 3: KIỂM TRA ĐÃ TẢI CHƯA
     fun isModelDownloaded(model: AiModel): Boolean {
-        val file = File(context.getExternalFilesDir(null), model.fileName)
-        return file.exists()
+        val fileOrDir = File(getModelDirectory(), model.fileName)
+        return if (model.isZip) {
+            fileOrDir.exists() && fileOrDir.isDirectory && (fileOrDir.listFiles()?.isNotEmpty() == true)
+        } else {
+            fileOrDir.exists()
+        }
     }
-    
-    // TÍNH NĂNG 4: CHUYỂN ĐỔI MÔ HÌNH (Lưu ID mô hình đang chọn)
+
     fun setActiveModelId(modelId: String) {
-        val prefs = context.getSharedPreferences("AiCarPrefs", Context.MODE_PRIVATE)
         prefs.edit().putString("active_model_id", modelId).apply()
     }
 
     fun getActiveModelId(): String? {
-        val prefs = context.getSharedPreferences("AiCarPrefs", Context.MODE_PRIVATE)
-        // Đổi "qwen_3_litert" thành "gemma_chuan_litert"
         return prefs.getString("active_model_id", "gemma_chuan_litert")
     }
 
     fun getActiveModel(): AiModel? {
         val activeId = getActiveModelId()
         return ModelRegistry.supportedModels.find { it.id == activeId }
+    }
+
+    fun unzip(zipFilePath: File, destDirectory: File) {
+        if (!destDirectory.exists()) destDirectory.mkdirs()
+        ZipFile(zipFilePath).use { zip ->
+            zip.entries().asSequence().forEach { entry ->
+                val destFile = File(destDirectory, entry.name)
+                if (entry.isDirectory) {
+                    destFile.mkdirs()
+                } else {
+                    destFile.parentFile?.mkdirs()
+                    zip.getInputStream(entry).use { input ->
+                        FileOutputStream(destFile).use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                }
+            }
+        }
     }
 }

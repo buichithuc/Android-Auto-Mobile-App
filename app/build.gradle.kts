@@ -80,10 +80,14 @@ dependencies {
 
     // 4. Các Core SDK phục vụ tính năng AI & Ô tô của đồ án
     implementation("com.google.ai.client.generativeai:generativeai:0.9.0") // Gemini API
-    implementation("androidx.car.app:app:1.4.0-rc01") // Android Auto Component
+    implementation("androidx.car.app:app:1.4.0") // Android Auto Component
 
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.12.0")
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.17.1") // ONNX Runtime
+    // Khai báo file thư viện GenAI Offline bạn vừa tự build
+    implementation(files("libs/onnxruntime-genai-release.aar"))
+
+// Kèm theo lõi ONNX Runtime cơ bản (Lõi này có sẵn trên mạng nên Android tự tải được)
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:latest.release")
 
     // 5. Thư viện Giao diện nền tảng (Giữ lại từ Version Catalog, ĐÃ XÓA dòng Firebase trùng lặp)
     implementation(libs.androidx.core.ktx)

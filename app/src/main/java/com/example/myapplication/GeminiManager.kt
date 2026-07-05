@@ -58,7 +58,7 @@ object GeminiManager {
         text("Bạn là trợ lý lái xe. " +
                 "THÔNG TIN QUAN TRỌNG: Hôm nay là ${getCurrentDateTime()}." +
                 "QUAN TRỌNG: Không sử dụng Markdown formatting (**bold**, *italic*, # heading, `code`, [link](url), v.v.). " +
-                "Sử dụng văn bản thuần túy, rõ ràng. ")
+                "Sử dụng văn bản thuần túy, rõ ràng ")
     }
 
 
@@ -97,7 +97,7 @@ object GeminiManager {
                     chunk.text?.let { emit(it) }
                 }
                 if(hasFunctionCall && functionName == "search_web"){
-                    emit("\n[Đang dùng Internet tìm kiếm: '$searchQuery'...]\n")
+                    emit("\nĐang tìm kiếm dữ liệu mới nhất: '$searchQuery'\n")
 
                     val rawSearchResults = SearchManager.searchGoogle(searchQuery)
 
@@ -127,6 +127,7 @@ object GeminiManager {
                     emit("Vì lý do an toàn hoặc dữ liệu quá dài, tôi không thể xử lý câu này.")
                     return@flow
                 }
+
                 Log.w("GEMINI_DEBUG", "Tier 1 ($TIER_1_MODEL) nghẽn! Đẩy luồng sang Tier 2 ($TIER_2_MODEL) để giữ tốc độ...")
 
                 try{

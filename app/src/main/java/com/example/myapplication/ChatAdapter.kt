@@ -24,8 +24,18 @@ class ChatAdapter(private var messages: List<ChatMessage>) : RecyclerView.Adapte
 
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         val message = messages[position]
-        if (holder is UserViewHolder) holder.bind(message)
-        else if (holder is AiViewHolder) holder.bind(message)
+
+        // Đọc font chữ từ SharedPreferences
+        val prefs = holder.itemView.context.getSharedPreferences("AiCarPrefs", android.content.Context.MODE_PRIVATE)
+        val fontSize = prefs.getFloat("chat_font_size", 16f)
+
+        if (holder is UserViewHolder) {
+            holder.bind(message)
+            holder.itemView.findViewById<TextView>(R.id.txtMessageUser).textSize = fontSize
+        } else if (holder is AiViewHolder) {
+            holder.bind(message)
+            holder.itemView.findViewById<TextView>(R.id.txtMessageAi).textSize = fontSize
+        }
     }
 
     override fun getItemCount() = messages.size
